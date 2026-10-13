@@ -229,3 +229,35 @@ test('the timer reads the portal, then waits for the interval', async (t) => {
   assert.equal(sync.nextRunAt.getTime() - clock.now.getTime(), 12 * 3600 * 1000);
   sync.stop();
 });
+
+// Gladys never polls the device (`should_poll: false`; and Gladys#3198 is not
+// fixed in 5.2.1): the container's own timer must keep the readings coming,
+// without any call to onPoll.
+test('the integration reads the portal on its own, without onPoll', async (t) => {
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  const { gladys, portal, sync, clock } = await setup(t, { autoStart: true });
+  const settle = async () => {
+    await sync.running;
+    await new Promise((resolve) => setImmediate(resolve));
+  };
+
+  // Started by the connection, first reading shortly after.
+  assert.equal(sync.nextRunAt.getTime() - clock.now.getTime(), 10_000);
+  t.mock.timers.tick(10_000);
+  await settle();
+  assert.equal(gladys.fake.discoveredDevices[0].should_poll, false);
+  assert.equal(sync.state.lastDay[KINDS.HEATING], '2026-10-11');
+
+  // Twelve hours later, the next day is read, and the one after.
+  for (const [now, day] of [
+    ['2026-10-13T08:00:00', '2026-10-12'],
+    ['2026-10-13T20:00:00', '2026-10-12'],
+    ['2026-10-14T08:00:00', '2026-10-13'],
+  ]) {
+    clock.now = new Date(now);
+    t.mock.timers.tick(12 * 3600 * 1000);
+    await settle();
+    assert.equal(sync.state.lastDay[KINDS.HEATING], day);
+  }
+  assert.deepEqual(readDays(portal, HEATING).slice(BACKFILL_DAYS), ['2026-10-12', '2026-10-13']);
+});

@@ -186,6 +186,7 @@ export class IstaClient {
     this.sessionStore = sessionStore;
     this.logger = logger ?? createLogger({ name: 'ista' });
     this.jar = new CookieJar(this.initialCookies());
+    this.signedIn = false;
   }
 
   usesPastedCookie() {
@@ -322,7 +323,10 @@ export class IstaClient {
       );
     }
     this.saveSession();
-    this.logger.info('Signed in to the ista portal');
+    // The session is renewed whenever the portal drops it, possibly at every
+    // reading: only the first sign-in of this account is worth an info line.
+    this.logger[this.signedIn ? 'debug' : 'info']('Signed in to the ista portal');
+    this.signedIn = true;
   }
 
   /**

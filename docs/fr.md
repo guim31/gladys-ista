@@ -97,8 +97,8 @@ requête par jour et par fluide, avec une pause entre deux.
   encore été vue.
 - **Eau non vérifiée.** La page du chauffage est connue grâce à un projet
   public qui la lisait en 2025. Les pages de l'eau sont une supposition :
-  quand le portail les refuse, aucune fonctionnalité d'eau n'apparaît, et les
-  journaux le disent. Si votre eau n'apparaît pas, signalez-le.
+  quand le portail les refuse, aucune fonctionnalité d'eau n'apparaît, et le
+  test de la connexion compte 0 compteur d'eau. Si votre eau n'apparaît pas, signalez-le.
 - **Un logement par compte.** Un compte qui a plusieurs logements montre leurs
   compteurs dans un seul appareil.
 - **Remise à zéro des index.** Les répartiteurs repartent en général de zéro au

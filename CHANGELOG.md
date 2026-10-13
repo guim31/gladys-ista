@@ -10,6 +10,16 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Added
+
+- The documentation in German and Spanish.
+
+### Changed
+
+- Quieter logs: a normal reading writes nothing at the default level, and a
+  failure that repeats at every retry is logged once when it starts and once
+  when it ends. The details stay available with `LOG_LEVEL=debug`.
+
 ## [1.0.1] - 2026-10-13
 
 ### Added

@@ -86,7 +86,7 @@ read yet, one small request per day and per fluid, with a pause between them.
   captcha). A successful sign-in with a real account has not been seen yet.
 - **Water not verified.** The heating page is known from a public project
   that read it in 2025. The water pages are a guess: when the portal refuses
-  them, no water feature appears, and the logs say so. If your water does not
+  them, no water feature appears, and the connection test counts 0 water meters. If your water does not
   show up, please report it.
 - **One dwelling per account.** An account with several dwellings shows their
   meters in one device.

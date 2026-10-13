@@ -1,0 +1,135 @@
+# ista Web'conso (Francia)
+
+Trae a Gladys las lecturas que **ista** hace a distancia en su edificio: los
+**repartidores de costes de calefacción** de sus radiadores y, cuando el
+portal los proporciona, sus **contadores de agua**. Los datos provienen del
+portal de residentes de ista [ista-webconso.fr](https://www.ista-webconso.fr)
+(«Mon espace résident»).
+
+> **Sin afiliación con ista.** ista y Web'conso son marcas de sus
+> propietarios. Esta integración es un proyecto independiente.
+>
+> **Desarrollada sin cuenta: se agradecen sus comentarios.** Nadie la ha
+> probado todavía con una cuenta Web'conso real. Es el tipo de integración más
+> frágil: no hay API pública, así que lee el portal como lo hace su navegador,
+> y puede dejar de funcionar el día en que ista modifique su sitio.
+
+## Lo que obtiene
+
+Un dispositivo, **Vivienda ista**, con:
+
+| Función                                         | Tipo en Gladys | Unidad  | Qué es                                                                                                       |
+| ----------------------------------------------- | -------------- | ------- | ------------------------------------------------------------------------------------------------------------ |
+| Unidades de calefacción del día                 | Contador       | ninguna | Las unidades de todos sus radiadores durante el día, ponderadas por el coeficiente de cada uno (facturadas). |
+| Radiador _estancia_ — n.º _serie_ (cada uno)    | Contador       | ninguna | El índice que muestra el repartidor de ese radiador.                                                         |
+| Agua fría / Agua caliente _estancia_ (cada uno) | Volumen        | m³      | El índice acumulado de ese contador. **No verificado**, vea las limitaciones.                                |
+| Agua fría — total / Agua caliente — total       | Volumen        | m³      | La suma de los índices, cuando la vivienda tiene varios contadores de ese fluido.                            |
+
+Las unidades de calefacción **no tienen unidad física**: un repartidor no mide
+energía, solo sirve para repartir la factura de calefacción del edificio entre
+las viviendas. Por eso se muestran como simples contadores, sin kWh.
+
+Cada lectura está **fechada en su propio día**, aunque el portal la publique
+con varios días de retraso: los gráficos de Gladys muestran el consumo el día
+en que se produjo, no el día en que se leyó. Al crear el dispositivo, se le
+envían los últimos 7 días ya leídos.
+
+Un **widget del panel**, «Consumo ista», muestra las unidades de calefacción
+del último día, los índices de agua, un histograma de las unidades de
+calefacción por día y la fecha de la última lectura.
+
+## Configuración
+
+1. Instale la integración y abra su pestaña **Configuración**.
+2. Deje **Método de inicio de sesión** en **Correo y contraseña**, e
+   introduzca el correo y la contraseña de su espacio de residente.
+3. Elija el **Idioma de los nombres de funciones** (Gladys no comunica su
+   idioma a una integración; los nombres quedan fijados al crear el
+   dispositivo).
+4. Guarde y haga clic en **Probar la conexión y leer ahora**. El mensaje bajo
+   el botón indica cuántos repartidores y contadores se han encontrado, y la
+   fecha de la última lectura.
+5. Abra la pestaña **Descubrir** y añada el dispositivo **Vivienda ista**.
+
+### Cuando el correo y la contraseña no funcionan: la cookie de sesión
+
+Si el estado indica que el portal pide un captcha o un segundo factor, o que
+no se reconoce la página de inicio de sesión, puede confiar a la integración
+la sesión de su propio navegador. Es una solución de emergencia: la sesión
+**caduca** (cuando usted cierra la sesión, o tras un tiempo de inactividad), y
+entonces hay que pegar una nueva.
+
+1. En un ordenador, inicie sesión en
+   [ista-webconso.fr](https://www.ista-webconso.fr) y abra la página de
+   consumo de su vivienda.
+2. Abra las herramientas de desarrollo (**F12**), pestaña **Red**, y recargue
+   la página.
+3. Haga clic en una petición a `ista-webconso.fr`. En **Encabezados de
+   solicitud**, copie todo el valor de la línea **Cookie**. (O, en
+   **Aplicación** / **Almacenamiento** → **Cookies**, copie el valor de
+   `JSESSIONID`.)
+4. **No** haga clic después en «Se déconnecter» (cerrar sesión) en el portal:
+   eso cerraría la sesión. Simplemente cierre la pestaña.
+5. En Gladys: **Método de inicio de sesión** → **Cookie de sesión
+   (emergencia)**, pegue el texto en **Cookie de sesión**, guarde y haga clic
+   en **Probar la conexión y leer ahora**.
+
+Como cada lectura recupera los últimos 7 días, pegar una cookie nueva una vez
+por semana basta para mantener el historial completo.
+
+## Frecuencia de lectura del portal
+
+El portal se lee cada **12 horas** por defecto, ajustable de **3 a 24 horas**
+(**Intervalo de lectura**). ista actualiza las lecturas **como mucho una vez al
+día**, y muchos edificios solo se leen **una vez por semana**: leer más a
+menudo no aporta nada y solo sobrecarga el portal. Cada lectura solo pide los
+días aún no leídos, una pequeña petición por día y por fluido, con una pausa
+entre dos.
+
+## Limitaciones
+
+- **Inicio de sesión verificado en parte.** El portal envía el navegador a la
+  página de inicio de sesión de ista (`login.ista.com`). La integración sigue
+  los mismos pasos, y esto se ha verificado en el portal real hasta el rechazo
+  de una cuenta inventada (sin captcha). Todavía no se ha visto un inicio de
+  sesión correcto con una cuenta real.
+- **Agua no verificada.** La página de la calefacción se conoce gracias a un
+  proyecto público que la leía en 2025. Las páginas del agua son una
+  suposición: cuando el portal las rechaza, no aparece ninguna función de
+  agua, y la prueba de conexión cuenta 0 contadores de agua. Si su agua no
+  aparece, notifíquelo.
+- **Una vivienda por cuenta.** Una cuenta con varias viviendas muestra sus
+  contadores en un solo dispositivo.
+- **Puesta a cero de los índices.** Los repartidores suelen volver a cero en
+  la lectura anual: el gráfico del índice cae entonces, no el de las unidades
+  del día.
+- **Los nombres quedan fijados** al crear el dispositivo (una regla de
+  Gladys): cambiar el nombre en el portal no cambia el de las funciones.
+
+## Solución de problemas
+
+La pantalla **Configuración** muestra el estado de la conexión:
+
+| Mensaje                                          | Qué hacer                                                                             |
+| ------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| El portal ha rechazado el correo o la contraseña | Compruébelos iniciando sesión en ista-webconso.fr.                                    |
+| Captcha / segundo factor                         | Utilice el modo cookie de sesión (arriba).                                            |
+| Inicie sesión una vez en un navegador            | El portal pide algo (nueva contraseña, condiciones de uso): hágalo y vuelva a probar. |
+| Página de inicio de sesión no reconocida         | El portal ha cambiado: utilice el modo cookie de sesión y notifíquelo.                |
+| La cookie de sesión ha caducado                  | Pegue una nueva.                                                                      |
+| Formato desconocido                              | El portal ha cambiado: notifíquelo con los registros.                                 |
+| No se puede acceder al portal de ista            | Nuevo intento en la hora siguiente, no hay nada que hacer.                            |
+
+Para notificar un problema, abra una incidencia en
+[GitHub](https://github.com/guim31/gladys-ista/issues) con los registros de la
+integración (Gladys → integración → **Registros**). Los registros nunca
+contienen su correo, su contraseña ni su cookie; cuando el portal responde en
+un formato desconocido, muestran su **estructura** (nombres de los campos, sin
+los valores), que es lo necesario para adaptar la integración.
+
+## Privacidad
+
+Su correo, su contraseña o su cookie permanecen en la configuración de
+Gladys. La integración guarda la sesión del portal y las lecturas recientes
+en su propio volumen (`/data`), y solo se comunica con el portal y con la
+página de inicio de sesión de ista.
