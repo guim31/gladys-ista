@@ -1,0 +1,80 @@
+{
+  "response": [
+    {
+      "pointsComptage": [
+        {
+          "metadata": {
+            "numeroPointComptage": 100001,
+            "numeroSerieRepartiteur": 90000001,
+            "codePiece": "SEJ",
+            "libellePiece": "SEJOUR",
+            "libelleTypeRepartiteur": "Répartiteur électronique",
+            "avecForfait": false
+          },
+          "consommation": {
+            "is_null": false,
+            "consommationBrute": {
+              "avecPonderationDju": 9.5,
+              "sansPonderationDju": 10,
+              "valeurDju": 8.2
+            },
+            "consommationCorrigee": {
+              "avecPonderationDju": 11.4,
+              "sansPonderationDju": 12,
+              "valeurDju": 8.2
+            },
+            "indexDernierJourPeriode": 1520
+          }
+        },
+        {
+          "metadata": {
+            "numeroPointComptage": 100002,
+            "numeroSerieRepartiteur": 90000002,
+            "codePiece": "CH1",
+            "libellePiece": "CHAMBRE 1",
+            "libelleTypeRepartiteur": "Répartiteur électronique",
+            "avecForfait": false
+          },
+          "consommation": {
+            "is_null": false,
+            "consommationBrute": {
+              "avecPonderationDju": 3.8,
+              "sansPonderationDju": 4,
+              "valeurDju": 8.2
+            },
+            "consommationCorrigee": {
+              "avecPonderationDju": 2.85,
+              "sansPonderationDju": 3,
+              "valeurDju": 8.2
+            },
+            "indexDernierJourPeriode": 640
+          }
+        },
+        {
+          "metadata": {
+            "numeroPointComptage": 100003,
+            "numeroSerieRepartiteur": 90000003,
+            "codePiece": "SDB",
+            "libellePiece": "SALLE DE BAINS",
+            "libelleTypeRepartiteur": "Répartiteur électronique",
+            "avecForfait": false
+          },
+          "consommation": {
+            "is_null": false,
+            "consommationBrute": {
+              "avecPonderationDju": "1,9",
+              "sansPonderationDju": "2",
+              "valeurDju": 8.2
+            },
+            "consommationCorrigee": {
+              "avecPonderationDju": "1,43",
+              "sansPonderationDju": "1,5",
+              "valeurDju": 8.2
+            },
+            "indexDernierJourPeriode": "212"
+          }
+        }
+      ]
+    }
+  ]
+}

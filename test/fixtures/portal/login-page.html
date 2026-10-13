@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <title>Connexion - ista</title>
+  </head>
+  <body>
+    <div id="kc-content">
+      <form
+        id="kc-form-login"
+        onsubmit="
+          login.disabled = true;
+          return true;
+        "
+        action="https://login.ista.com/realms/dsp-webconso-fr/login-actions/authenticate?session_code=SESSIONCODE&amp;execution=EXECUTION&amp;client_id=dsp-webconso-fr&amp;tab_id=TABID"
+        method="post"
+      >
+        <label for="username">Adresse e-mail</label>
+        <input
+          tabindex="1"
+          id="username"
+          name="username"
+          value=""
+          type="text"
+          autofocus
+          autocomplete="off"
+        />
+        <label for="password">Mot de passe</label>
+        <input tabindex="2" id="password" name="password" type="password" autocomplete="off" />
+        <input type="hidden" id="id-hidden-input" name="credentialId" />
+        <input tabindex="4" name="login" id="kc-login" type="submit" value="Se connecter" />
+      </form>
+    </div>
+  </body>
+</html>

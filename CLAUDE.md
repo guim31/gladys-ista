@@ -31,16 +31,21 @@ pushing.
 ## Architecture
 
 ```
-index.js                          SDK wiring only: handlers registered before connect()
-src/devices/index.js              registry of the device blueprints + dispatch helpers
-src/devices/<type>.js             one device type per file (buildDevice, onPoll, onSetValue...)
-src/scenes.js                     scene action handlers (manifest `scene_actions`)
-src/widgets.js                    dashboard widget handlers (manifest `widgets`)
+index.js                          SDK wiring only: registerHandlers(gladys) then connect()
+src/app.js                        handlers: scan, poll fallback, action, widget, config, lifecycle
+src/sync.js                       container timer, days to read, dated states, connection status
+src/ista/client.js                portal client: Keycloak sign-in, session, consumption pages
+src/ista/cookies.js               cookie jar + parsing of a pasted browser cookie
+src/ista/parse.js                 portal JSON answers -> counting points
+src/devices/dwelling.js           the one Gladys device and its features
+src/widgets.js                    dashboard widget handler (manifest `widgets`)
+src/i18n.js                       every text sent to Gladys, en/fr/de/es
 src/config.js                     DEFAULT_CONFIG (mirrors the manifest defaults) + normalization
-src/weather.js                    example driver (Open-Meteo)
+src/store.js                      /data files: session.json, state.json
 gladys-assistant-integration.json manifest: name, config_schema, actions, image...
 docs/en.md, docs/fr.md            user documentation, re-hosted by Gladys (mandatory)
-test/                             node --test, against the SDK's fake Gladys (integration-sdk/testing)
+test/                             node --test, SDK fake Gladys + test/helpers/fakePortal.js
+test/fixtures/portal/             reconstructed, anonymized portal answers (no real account)
 .github/scripts/release.mjs       release helpers (manifest bump, changelog), tested in test/
 ```
 
@@ -97,6 +102,9 @@ code de ce dépôt. Compléter ce fichier quand un nouveau piège est découvert
 - **Publier n'est jamais le travail d'une session de code** : ni Release, ni tag, ni topic, ni
   version modifiée à la main. L'orchestrateur s'en charge une fois la PR fusionnée. Les workflows
   sont ceux du template : ne pas les modifier.
+- Le proxy des sessions de code **refuse les portails tiers** (`ista-webconso.fr`, `ista.com` :
+  403 au CONNECT, et WebFetch ne les résout pas) : une intégration de portail se construit sur des
+  fixtures reconstruites, et la connexion reste à vérifier par un utilisateur. Le dire.
 - Le dépôt est **public** : aucun secret, aucune adresse ni détail d'infrastructure privée, ni
   ici, ni dans les tests, ni dans les captures.
 
@@ -131,6 +139,16 @@ code de ce dépôt. Compléter ce fichier quand un nouveau piège est découvert
   actif.
 - Un changement de structure fait proposer « Mettre à jour » dans l'onglet Découverte
   (`structure_changed`). Un changement des seules `supported_options` ne le déclenche pas.
+- **`counter-sensor` n'a pas de groupe de types** dans les constantes du cœur (ni dans celles du
+  SDK : `DEVICE_FEATURE_TYPES.COUNTER_SENSOR` vaut `undefined`) : écrire le type `'integer'` en
+  clair. Le front libelle le couple `counter-sensor/integer` (« Compteur »), sans unité.
+- **États datés** : `publishState(id, { state, created_at })` (ou `created_at` dans
+  `publishStates`) range un état passé dans l'historique. Le cœur
+  (`device.saveHistoricalState`) ignore un état déjà présent au même instant avec la même valeur,
+  et ne touche `last_value` que si l'instant est plus récent que l'actuel : republier une journée
+  ne crée pas de doublon. C'est la bonne voie pour un portail qui publie avec retard (relevés
+  quotidiens, hebdomadaires), hors électricité. Pour des kWh,
+  `publishEnergyConsumption` (Gladys 5.2.0) remplace l'index.
 - **Jauge** : l'aiguille se place par `(value - min) / (max - min)` des bornes de la
   fonctionnalité. `gauge_min`/`gauge_max` ne pilotent que les couleurs, et le cœur n'applique
   jamais `min`/`max` en écriture : ce sont des bornes d'affichage. Une valeur signée exige des
@@ -152,6 +170,8 @@ code de ce dépôt. Compléter ce fichier quand un nouveau piège est découvert
 
 **Widgets, déclencheurs, actions de scène (SDK ≥ 0.14, Gladys ≥ 5.1)**
 
+- **Gladys 5.2.0 est publiée depuis le 12/10/2026** (capacité `energy_contracts`, minimum 5.2.0
+  au store). Ce qui ne sert qu'aux kWh n'oblige pas à relever `gladys_version`.
 - **Cibler la dernière version publiée du cœur, pas `master`** : la spec de `master` décrit des
   fonctions non publiées. Les boutons de widget qui ouvrent un formulaire (#3168, commit 3feb2cf8)
   sont absents de la 5.1.4 : le bouton s'affiche et n'envoie rien. Vérifier par `git tag --contains`.
@@ -175,6 +195,8 @@ code de ce dépôt. Compléter ce fichier quand un nouveau piège est découvert
   d'après `language` est correct.
 - Les filtres de scène ne font qu'égalité et appartenance : un seuil reste le travail d'un capteur.
 - **Les clés de widgets, de déclencheurs et d'actions sont figées une fois publiées.**
+- Le faux Gladys du SDK rend le message d'une action dans `ack.data.message` (pas `ack.data`), le
+  contenu d'un widget dans `ack.data.content`.
 - `gladys_version` `>=5.1.0` dès qu'il y a widgets, déclencheurs ou actions de scène.
 
 ## Store

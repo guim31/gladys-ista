@@ -1,0 +1,46 @@
+{
+  "response": [
+    {
+      "pointsComptage": [
+        {
+          "metadata": {
+            "numeroPointComptage": 200001,
+            "numeroSerieCompteur": "EF-0000001",
+            "codePiece": "CUI",
+            "libellePiece": "CUISINE",
+            "libelleTypeCompteur": "Compteur eau froide"
+          },
+          "consommation": {
+            "is_null": false,
+            "consommationBrute": {
+              "sansPonderationDju": 0.12
+            },
+            "consommationCorrigee": {
+              "sansPonderationDju": 0.12
+            },
+            "indexDernierJourPeriode": "123,456"
+          }
+        },
+        {
+          "metadata": {
+            "numeroPointComptage": 200002,
+            "numeroSerieCompteur": "EF-0000002",
+            "codePiece": "SDB",
+            "libellePiece": "SALLE DE BAINS",
+            "libelleTypeCompteur": "Compteur eau froide"
+          },
+          "consommation": {
+            "is_null": false,
+            "consommationBrute": {
+              "sansPonderationDju": 0.08
+            },
+            "consommationCorrigee": {
+              "sansPonderationDju": 0.08
+            },
+            "indexDernierJourPeriode": 45.5
+          }
+        }
+      ]
+    }
+  ]
+}
