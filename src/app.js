@@ -79,6 +79,10 @@ export function registerHandlers(gladys, options = {}) {
 
   gladys.onAction(ACTIONS.TEST_CONNECTION, async () => {
     const result = await sync.refresh();
+    // One line per user action, whatever the failure logging already said.
+    logger.info(
+      `Connection test: ${result.ok ? 'OK' : `failed (${sync.state.status?.text ?? 'unknown'})`}`,
+    );
     return describeConnection(sync, result);
   });
 

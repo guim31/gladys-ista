@@ -112,6 +112,12 @@ export class IstaSync {
     this.running = null;
     this.config = null;
     this.client = null;
+    // What was last logged as failing (status text key), to write one line
+    // when a failure starts and one when it ends, not one per attempt. In
+    // memory only: a restart logs a lasting failure again, once.
+    this.failure = null;
+    // Water fluids whose reading failure was already logged.
+    this.waterFailures = new Set();
   }
 
   /**
@@ -176,6 +182,12 @@ export class IstaSync {
     await this.publishStates(this.state.recent);
   }
 
+  // No periodic re-publication of an unchanged value: every state is dated
+  // with its day, and the core moves `last_value` only for a more recent
+  // instant. Re-sending the last index stamped "now" would make the next
+  // reading (stamped with its own, earlier day) invisible as last value, and
+  // drop the history curve back between two days; re-sending it with its own
+  // date changes nothing. The freshness Gladys shows is the portal's.
   async publishStates(states) {
     for (let i = 0; i < states.length; i += STATES_PER_REQUEST) {
       await this.gladys.publishStates(
@@ -275,6 +287,10 @@ export class IstaSync {
         return { ok: false, authError: true };
       }
       await this.readNewDays();
+      if (this.failure) {
+        this.logger.info('The ista portal answers again');
+        this.failure = null;
+      }
       await this.setStatus(true);
       this.gladys.requestWidgetRefresh(DWELLING_WIDGET);
       return { ok: true };
@@ -285,20 +301,38 @@ export class IstaSync {
     }
   }
 
+  /** Log a failure when it starts or changes, at debug level while it lasts. */
+  logFailure(textKey, level, message) {
+    const repeated = this.failure === textKey;
+    this.failure = textKey;
+    this.logger[repeated ? 'debug' : level](message);
+  }
+
   async handleError(err) {
     if (err instanceof AuthError) {
-      this.logger.warn(`Sign-in to the ista portal failed (${err.code}): ${err.message}`);
-      await this.setStatus(false, AUTH_STATUS_TEXTS[err.code] ?? 'status_invalid_credentials');
+      const textKey = AUTH_STATUS_TEXTS[err.code] ?? 'status_invalid_credentials';
+      this.logFailure(
+        textKey,
+        'warn',
+        `Sign-in to the ista portal failed (${err.code}): ${err.message}`,
+      );
+      await this.setStatus(false, textKey);
       return { ok: false, authError: true, error: err };
     }
     if (err instanceof UnexpectedAnswerError) {
-      this.logger.error(
+      this.logFailure(
+        'status_unexpected_answer',
+        'error',
         `Unexpected answer from the ista portal: ${err.message}. Structure (no values): ${JSON.stringify(err.shape)}`,
       );
       await this.setStatus(false, 'status_unexpected_answer');
       return { ok: false, error: err };
     }
-    this.logger.error(`Reading the ista portal failed: ${err.message}`);
+    this.logFailure(
+      'status_unreachable',
+      'error',
+      `Reading the ista portal failed: ${err.message}`,
+    );
     await this.setStatus(false, 'status_unreachable');
     return { ok: false, error: err };
   }
@@ -343,7 +377,10 @@ export class IstaSync {
           if (this.isUnsupportedPage(err) && this.state.water[kind] !== WATER_STATUS.AVAILABLE) {
             this.markWaterUnavailable(kind, err);
           } else {
-            this.logger.warn(`Reading the ${kind} of ${day} failed: ${err.message}`);
+            // Retried at every run: logged once, until it works again.
+            const level = this.waterFailures.has(kind) ? 'debug' : 'warn';
+            this.waterFailures.add(kind);
+            this.logger[level](`Reading the ${kind} of ${day} failed: ${err.message}`);
           }
           break;
         }
@@ -354,9 +391,12 @@ export class IstaSync {
         }
         if (isWater) {
           this.state.water[kind] = WATER_STATUS.AVAILABLE;
+          if (this.waterFailures.delete(kind)) {
+            this.logger.info(`The ${kind} readings answer again`);
+          }
         }
         if (ofKind.some((point) => point.index === null)) {
-          this.logger.info(`No ${kind} reading for ${day} on the portal yet`);
+          this.logger.debug(`No ${kind} reading for ${day} on the portal yet`);
           break;
         }
         pointsChanged = this.mergePoints(points) || pointsChanged;
@@ -379,7 +419,7 @@ export class IstaSync {
       await this.publishStates(newStates);
       this.state.recent = [...this.state.recent, ...newStates].slice(-MAX_RECENT_STATES);
     }
-    this.logger.info(
+    this.logger.debug(
       `Portal read: ${requests} request(s), ${newStates.length} new reading(s), latest day ${this.latestDay() ?? 'none'}`,
     );
   }
@@ -390,7 +430,9 @@ export class IstaSync {
 
   markWaterUnavailable(kind, err) {
     this.state.water[kind] = WATER_STATUS.UNAVAILABLE;
-    this.logger.info(
+    // Probed again at every start: debug only. The user sees it in the
+    // result of the connection test ("water meters: 0").
+    this.logger.debug(
       `No ${kind} readings on the portal${err ? ` (${err.message})` : ''}: the ${kind} features stay hidden. If your dwelling has such a meter, please report it (see the documentation).`,
     );
   }

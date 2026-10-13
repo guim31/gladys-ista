@@ -1,6 +1,8 @@
 // -----------------------------------------------------------------------------
 // Every text a user sees exists in English, French, German and Spanish: the
-// manifest, the texts sent from the container (src/i18n.js) and the widget.
+// manifest, the texts sent from the container (src/i18n.js), the widget and
+// the documentation (the store publishes docs/de.md and docs/es.md too since
+// Gladys 5.2).
 // German uses the informal "du", Spanish the formal "usted" (maintainer's
 // decision for all his integrations).
 // -----------------------------------------------------------------------------
@@ -107,4 +109,34 @@ test('placeholders keep the same names in every language', () => {
       assert.equal(names(text[language]), names(text.en), `${key}.${language}: placeholders`);
     }
   }
+});
+
+const docs = Object.fromEntries(
+  await Promise.all(
+    LANGUAGES.map(async (language) => [
+      language,
+      await readFile(new URL(`../docs/${language}.md`, import.meta.url), 'utf8'),
+    ]),
+  ),
+);
+// Heading levels in order, outside code blocks: the same sections everywhere.
+const headingLevels = (markdown) =>
+  markdown
+    .replace(/```[\s\S]*?```/g, '')
+    .split('\n')
+    .filter((line) => /^#{1,6} /.test(line))
+    .map((line) => line.match(/^#+/)[0].length);
+
+test('the documentation exists in every language, with the same sections', () => {
+  const reference = headingLevels(docs.en);
+  assert.ok(reference.length >= 8);
+  for (const language of LANGUAGES) {
+    assert.ok(docs[language].length >= 300, `docs/${language}.md is too short`);
+    assert.deepEqual(headingLevels(docs[language]), reference, `docs/${language}.md: sections`);
+  }
+});
+
+test('the documentation keeps "du" in German and "usted" in Spanish', () => {
+  assert.doesNotMatch(docs.de, GERMAN_FORMAL);
+  assert.doesNotMatch(docs.es, SPANISH_INFORMAL);
 });

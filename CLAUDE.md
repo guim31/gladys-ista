@@ -44,6 +44,7 @@ src/config.js                     DEFAULT_CONFIG (mirrors the manifest defaults)
 src/store.js                      /data files: session.json, state.json
 gladys-assistant-integration.json manifest: name, config_schema, actions, image...
 docs/en.md, docs/fr.md            user documentation, re-hosted by Gladys (mandatory)
+docs/de.md, docs/es.md            same, optional (published by the store since Gladys 5.2)
 test/                             node --test, SDK fake Gladys + test/helpers/fakePortal.js
 test/fixtures/portal/             reconstructed, anonymized portal answers (no real account)
 .github/scripts/release.mjs       release helpers (manifest bump, changelog), tested in test/
@@ -228,5 +229,6 @@ code de ce dépôt. Compléter ce fichier quand un nouveau piège est découvert
 Tout texte montré à l'utilisateur existe en **`en`, `fr`, `de` et `es`** : manifeste, contenu des widgets, messages,
 noms de fonctionnalités. L'allemand **tutoie** (« du »), l'espagnol **vouvoie** (« usted ») : décision de Guilhem,
 appliquée à ses 21 intégrations. `test/i18n.test.js` doit échouer sur une langue manquante, un texte vide ou trop
-long, et sur un « Sie »/« Ihr… » de politesse en allemand. Le store ne publie que `docs/en.md` et `docs/fr.md`
-(`DOCS_LANGUAGES` d'integration-store) : pas de doc de/es.
+long, et sur un « Sie »/« Ihr… » de politesse en allemand. `docs/en.md` et `docs/fr.md` sont obligatoires
+(`DOCS_LANGUAGES` d'integration-store) ; depuis Gladys 5.2, le store publie aussi `docs/de.md` et `docs/es.md`
+quand ils existent (`DOCS_OPTIONAL_LANGUAGES`). Les quatre docs gardent les mêmes sections (`test/i18n.test.js`).
