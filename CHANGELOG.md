@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [1.0.2] - 2026-10-13
+
 ### Added
 
 - The documentation in German and Spanish.
@@ -36,5 +38,6 @@ the notes of the version's GitHub Release.
   dashboard widget.
 - Every text in English, French, German and Spanish.
 
-[Unreleased]: https://github.com/guim31/gladys-ista/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/guim31/gladys-ista/compare/v1.0.2...HEAD
+[1.0.2]: https://github.com/guim31/gladys-ista/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/guim31/gladys-ista/releases/tag/v1.0.1

@@ -1,6 +1,6 @@
 {
   "name": "gladys-ista",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "description": "Gladys Assistant integration for the ista Web'conso resident portal (France): heat cost allocators and water meters. Not affiliated with ista.",
   "type": "module",
