@@ -12,6 +12,11 @@ value (counting point numbers, serials, rooms, indexes) is invented.
 - `cold-water-day.json`: a water answer of the same shape. **Hypothetical**:
   nobody has seen a real water answer yet (see `DISPATCHES` in
   `src/ista/client.js`).
-- `login-page.html`: a Keycloak login form like the one of `login.ista.com`.
+- `public-home.html`: the portal's public home page, where the bare resident
+  space URL lands. It has no form, only a "Se connecter" link
+  (`home.do?dispatch=authenticate`) that redirects to the login form.
+- `login-page.html`: a Keycloak login form like the one of `login.ista.com`
+  (`username`, `password`, an empty hidden `credentialId`, no captcha, as seen
+  on the live portal on 2026-10-13 without credentials).
 - `login-error.html`, `login-otp.html`, `login-captcha.html`: the same page
   after a refused password, asking for a second factor, with a captcha.

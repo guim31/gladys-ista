@@ -105,6 +105,12 @@ code de ce dépôt. Compléter ce fichier quand un nouveau piège est découvert
 - Le proxy des sessions de code **refuse les portails tiers** (`ista-webconso.fr`, `ista.com` :
   403 au CONNECT, et WebFetch ne les résout pas) : une intégration de portail se construit sur des
   fixtures reconstruites, et la connexion reste à vérifier par un utilisateur. Le dire.
+- **Portail ista** (vérifié le 13/10/2026, sans identifiants) : `/espace-client-v2/` mène à une
+  page d'accueil publique (`public/home.do?dispatch=init`) **sans formulaire**, dont le lien
+  « Se connecter » (`?dispatch=authenticate`) redirige vers le Keycloak
+  `login.ista.com/realms/dsp-webconso-fr` (`username`, `password`, `credentialId` caché, pas de
+  captcha). Partir de `dispatch=authenticate`, et traiter une page `public/` comme une session
+  perdue.
 - Le dépôt est **public** : aucun secret, aucune adresse ni détail d'infrastructure privée, ni
   ici, ni dans les tests, ni dans les captures.
 

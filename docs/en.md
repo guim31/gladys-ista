@@ -80,9 +80,10 @@ read yet, one small request per day and per fluid, with a pause between them.
 
 ## Limits
 
-- **Sign-in not verified.** The portal sends the browser to ista's sign-in
-  page (`login.ista.com`). The integration follows the same steps; this has
-  not been checked against a real account.
+- **Sign-in partly verified.** The portal sends the browser to ista's sign-in
+  page (`login.ista.com`). The integration follows the same steps, and this
+  was checked on the live portal up to the refusal of a made-up account (no
+  captcha). A successful sign-in with a real account has not been seen yet.
 - **Water not verified.** The heating page is known from a public project
   that read it in 2025. The water pages are a guess: when the portal refuses
   them, no water feature appears, and the logs say so. If your water does not

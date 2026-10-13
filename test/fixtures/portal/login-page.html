@@ -8,11 +8,12 @@
     <div id="kc-content">
       <form
         id="kc-form-login"
+        name="loginForm"
         onsubmit="
           login.disabled = true;
           return true;
         "
-        action="https://login.ista.com/realms/dsp-webconso-fr/login-actions/authenticate?session_code=SESSIONCODE&amp;execution=EXECUTION&amp;client_id=dsp-webconso-fr&amp;tab_id=TABID"
+        action="https://login.ista.com/realms/dsp-webconso-fr/login-actions/authenticate?session_code=SESSIONCODE&amp;execution=EXECUTION&amp;client_id=dsp-webconso-fr&amp;tab_id=TABID&amp;client_data=CLIENTDATA"
         method="post"
       >
         <label for="username">Adresse e-mail</label>

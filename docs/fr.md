@@ -90,9 +90,11 @@ requête par jour et par fluide, avec une pause entre deux.
 
 ## Limites
 
-- **Connexion non vérifiée.** Le portail envoie le navigateur vers la page de
-  connexion d'ista (`login.ista.com`). L'intégration suit les mêmes étapes ;
-  cela n'a pas été vérifié sur un vrai compte.
+- **Connexion vérifiée en partie.** Le portail envoie le navigateur vers la
+  page de connexion d'ista (`login.ista.com`). L'intégration suit les mêmes
+  étapes, et cela a été vérifié sur le vrai portail jusqu'au refus d'un compte
+  inventé (pas de captcha). Une connexion réussie avec un vrai compte n'a pas
+  encore été vue.
 - **Eau non vérifiée.** La page du chauffage est connue grâce à un projet
   public qui la lisait en 2025. Les pages de l'eau sont une supposition :
   quand le portail les refuse, aucune fonctionnalité d'eau n'apparaît, et les

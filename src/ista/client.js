@@ -21,9 +21,13 @@ import { KINDS, UnexpectedAnswerError, describeShape, parseConsumptionAnswer } f
 
 export const PORTAL_DOMAIN = 'ista-webconso.fr';
 export const PORTAL_ORIGIN = `https://${PORTAL_DOMAIN}`;
-// A protected page of the resident space: opening it without a session sends
-// the browser to the login form, with the right redirect back.
-export const ENTRY_URL = `${PORTAL_ORIGIN}/espace-client-v2/`;
+// The "Se connecter" link of the portal's public home page: it redirects to
+// ista's Keycloak login form, with the right redirect back. (The bare
+// resident space URL only lands on that public home page, which has no form.)
+export const ENTRY_URL = `${PORTAL_ORIGIN}/espace-client-v2/public/home.do?dispatch=authenticate`;
+// Hops through pages that only link to the login (the public home page)
+// before giving up on finding the form.
+const MAX_LOGIN_LINK_HOPS = 2;
 export const CONSUMPTION_URL = `${PORTAL_ORIGIN}/espace-client-v2/occupant/ficheLogement.do`;
 
 // The `dispatch` parameter of the consumption page, per fluid. Heating is the
@@ -142,6 +146,24 @@ export function findLoginForm(html, pageUrl) {
   return null;
 }
 
+/**
+ * The sign-in link of a portal page (`…home.do?dispatch=authenticate`), as an
+ * absolute URL on the portal, or null.
+ */
+export function findAuthenticateLink(html, pageUrl) {
+  for (const tag of html.match(/<a\b[^>]*>/gi) ?? []) {
+    const href = attribute(tag, 'href');
+    if (!href || !/[?&]dispatch=authenticate\b/.test(href)) {
+      continue;
+    }
+    const url = new URL(href, pageUrl);
+    if (url.hostname.replace(/^www\./, '') === PORTAL_DOMAIN) {
+      return url.toString();
+    }
+  }
+  return null;
+}
+
 /** Calendar day after `day` (`YYYY-MM-DD`, no time zone involved). */
 export function nextDay(day) {
   const date = new Date(`${day}T00:00:00Z`);
@@ -248,11 +270,21 @@ export class IstaClient {
       throw new AuthError(AUTH_ERRORS.NO_CREDENTIALS, 'e-mail or password missing');
     }
     this.jar.clear();
-    const page = await this.request(ENTRY_URL);
+    let page = await this.request(ENTRY_URL);
+    let form = findLoginForm(page.body, page.url);
+    // Should the portal show its public home page again, follow its sign-in
+    // link like a user would.
+    for (let hop = 0; !form && hop < MAX_LOGIN_LINK_HOPS; hop += 1) {
+      const link = findAuthenticateLink(page.body, page.url);
+      if (!link) {
+        break;
+      }
+      page = await this.request(link);
+      form = findLoginForm(page.body, page.url);
+    }
     if (CAPTCHA_MARKERS.test(page.body)) {
       throw new AuthError(AUTH_ERRORS.CAPTCHA, 'the login page asks for a captcha');
     }
-    const form = findLoginForm(page.body, page.url);
     if (!form) {
       throw new AuthError(
         AUTH_ERRORS.LOGIN_FORM_NOT_FOUND,
@@ -320,7 +352,15 @@ export class IstaClient {
   async requestJson(url) {
     const result = await this.request(url, { accept: 'application/json, text/javascript, */*' });
     const onPortal = new URL(result.url).hostname.replace(/^www\./, '') === PORTAL_DOMAIN;
-    if (!onPortal || findLoginForm(result.body, result.url) || result.status === 401) {
+    // Without a valid session the portal answers with its login form, or with
+    // its public home page (sign-in link, no form).
+    const signedOut =
+      !onPortal ||
+      result.status === 401 ||
+      findLoginForm(result.body, result.url) !== null ||
+      findAuthenticateLink(result.body, result.url) !== null ||
+      new URL(result.url).pathname.includes('/public/');
+    if (signedOut) {
       return { sessionExpired: true };
     }
     if (result.status >= 400) {

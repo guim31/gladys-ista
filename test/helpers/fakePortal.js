@@ -64,6 +64,8 @@ function json(value) {
  * @param {string} [options.loginPage] fixture served as the login page
  * @param {string} [options.afterLogin] fixture served after a correct password
  *   (a second factor page, for instance); the portal otherwise
+ * @param {boolean} [options.homeFirst] the first sign-in link lands on the
+ *   public home page again (the client must follow its link)
  * @param {Function} [options.answer] `(dispatch, day) => object | Response`,
  *   the consumption answer; defaults to the heating fixture for heating and a
  *   404 for water
@@ -72,6 +74,7 @@ export function createFakePortal(options = {}) {
   const portal = {
     requests: [],
     logins: 0,
+    authenticateHits: 0,
     sessions: new Set(),
     expireSessions() {
       portal.sessions.clear();
@@ -97,8 +100,19 @@ export function createFakePortal(options = {}) {
         `${LOGIN}/protocol/openid-connect/auth?client_id=dsp-webconso-fr&response_type=code&redirect_uri=${encodeURIComponent(`${PORTAL}/espace-client-v2/callback`)}&state=STATE`,
       );
 
+    const toHome = () => redirect(`${PORTAL}/espace-client-v2/public/home.do?dispatch=init`);
+    // Like the live portal: the bare resident space lands on a public home
+    // page whose "Se connecter" link (dispatch=authenticate) leads to Keycloak.
     if (url.origin === PORTAL && url.pathname === '/espace-client-v2/') {
-      return signedIn ? html('<html>Accueil</html>') : toLogin();
+      return signedIn ? html('<html>Accueil</html>') : toHome();
+    }
+    if (url.origin === PORTAL && url.pathname === '/espace-client-v2/public/home.do') {
+      if (url.searchParams.get('dispatch') === 'authenticate') {
+        portal.authenticateHits += 1;
+        // `homeFirst`: the first sign-in attempt lands on the home page again.
+        return options.homeFirst && portal.authenticateHits === 1 ? toHome() : toLogin();
+      }
+      return html(fixture('public-home.html'));
     }
     if (url.origin === LOGIN.replace(/\/realms.*/, '')) {
       if (url.pathname.endsWith('/protocol/openid-connect/auth')) {
@@ -133,7 +147,7 @@ export function createFakePortal(options = {}) {
     }
     if (url.origin === PORTAL && url.pathname === '/espace-client-v2/occupant/ficheLogement.do') {
       if (!signedIn) {
-        return toLogin();
+        return toHome();
       }
       const result = answer(url.searchParams.get('dispatch'), url.searchParams.get('start'));
       return result instanceof Response ? result : json(result);

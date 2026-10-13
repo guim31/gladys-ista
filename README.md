@@ -41,9 +41,13 @@ shows it from the integration's Configuration screen).
 
 ## How the portal is read
 
-1. **Sign-in.** A protected page of the resident space
-   (`https://ista-webconso.fr/espace-client-v2/`) redirects to ista's identity
-   server, a Keycloak realm (`login.ista.com/realms/dsp-webconso-fr`). The
+1. **Sign-in.** The "Se connecter" link of the portal's public home page
+   (`https://ista-webconso.fr/espace-client-v2/public/home.do?dispatch=authenticate`)
+   redirects to ista's identity server, a Keycloak realm
+   (`login.ista.com/realms/dsp-webconso-fr`); the bare resident space URL only
+   lands on that home page, which has no form, so a page that only carries the
+   link is followed. Checked on the live portal (without credentials) up to the
+   refusal of a fake account; a successful sign-in is not verified yet. The
    client follows the redirects by hand with its own cookie jar, fills the
    login form it finds there (Keycloak's `username`/`password`, or the older
    `login`/`pwd`), and comes back to the portal with its `JSESSIONID`. The

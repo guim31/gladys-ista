@@ -6,6 +6,7 @@ import {
   AuthError,
   IstaClient,
   PortalError,
+  findAuthenticateLink,
   findLoginForm,
   nextDay,
   safeUrl,
@@ -68,6 +69,35 @@ test('signs in again once when the session expired', async () => {
   portal.expireSessions();
   await ista.fetchDay(KINDS.HEATING, '2026-10-11');
   assert.equal(portal.logins, 2);
+});
+
+test('the public home page is followed to Keycloak, and a fake account is refused', async () => {
+  // Home -> "Se connecter" link -> Keycloak form -> refused password: the
+  // path of the live portal, checked without credentials on 2026-10-13.
+  const portal = createFakePortal({ homeFirst: true });
+  await assert.rejects(
+    client(portal, { email: 'nobody@example.org', password: 'wrong' }).login(),
+    (err) => err instanceof AuthError && err.code === AUTH_ERRORS.INVALID_CREDENTIALS,
+  );
+  const visited = portal.requests.map((r) => new URL(r.url));
+  assert.deepEqual(
+    visited
+      .slice(0, 4)
+      .map((u) => `${u.host}${u.pathname}?${u.searchParams.get('dispatch') ?? ''}`),
+    [
+      'ista-webconso.fr/espace-client-v2/public/home.do?authenticate',
+      'ista-webconso.fr/espace-client-v2/public/home.do?init',
+      'ista-webconso.fr/espace-client-v2/public/home.do?authenticate',
+      'login.ista.com/realms/dsp-webconso-fr/protocol/openid-connect/auth?',
+    ],
+  );
+  assert.equal(visited.at(-1).pathname, '/realms/dsp-webconso-fr/login-actions/authenticate');
+});
+
+test('a page with neither form nor sign-in link is a portal change', async () => {
+  const fetch = async () => new Response('<html><p>Maintenance</p></html>', { status: 200 });
+  const ista = new IstaClient({ config: normalizeConfig(ACCOUNT), fetch, logger });
+  await assert.rejects(ista.login(), (err) => err.code === AUTH_ERRORS.LOGIN_FORM_NOT_FOUND);
 });
 
 test('a refused password is reported as such', async () => {
@@ -137,7 +167,7 @@ test('findLoginForm reads the Keycloak form', () => {
   const form = findLoginForm(fixture('login-page.html'), 'https://login.ista.com/x');
   assert.equal(
     form.action,
-    'https://login.ista.com/realms/dsp-webconso-fr/login-actions/authenticate?session_code=SESSIONCODE&execution=EXECUTION&client_id=dsp-webconso-fr&tab_id=TABID',
+    'https://login.ista.com/realms/dsp-webconso-fr/login-actions/authenticate?session_code=SESSIONCODE&execution=EXECUTION&client_id=dsp-webconso-fr&tab_id=TABID&client_data=CLIENTDATA',
   );
   assert.equal(form.userField, 'username');
   assert.equal(form.passwordField, 'password');
@@ -151,6 +181,25 @@ test('findLoginForm reads the Keycloak form', () => {
   assert.deepEqual(
     [legacy.action, legacy.userField, legacy.passwordField],
     ['https://ista-webconso.fr/espace-client-v2/login.do', 'login', 'pwd'],
+  );
+});
+
+test('findAuthenticateLink reads the sign-in link of the public home page', () => {
+  assert.equal(
+    findAuthenticateLink(
+      fixture('public-home.html'),
+      'https://ista-webconso.fr/espace-client-v2/public/home.do?dispatch=init',
+    ),
+    'https://ista-webconso.fr/espace-client-v2/public/home.do?dispatch=authenticate',
+  );
+  assert.equal(findLoginForm(fixture('public-home.html'), 'https://ista-webconso.fr/'), null);
+  // A link to another site is never followed.
+  assert.equal(
+    findAuthenticateLink(
+      '<a href="https://evil.example/x?dispatch=authenticate">x</a>',
+      'https://ista-webconso.fr/',
+    ),
+    null,
   );
 });
 
