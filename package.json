@@ -1,8 +1,8 @@
 {
-  "name": "gladys-integration-template-js",
+  "name": "gladys-ista",
   "version": "1.0.0",
   "private": true,
-  "description": "Official starter template to build an external integration for Gladys Assistant with the JavaScript SDK.",
+  "description": "Gladys Assistant integration for the ista Web'conso resident portal (France): heat cost allocators and water meters. Not affiliated with ista.",
   "type": "module",
   "main": "index.js",
   "scripts": {

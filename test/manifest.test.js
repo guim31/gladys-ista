@@ -7,10 +7,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { DEVICE_BLUEPRINTS, SCENE_TRIGGER_KEYS } from '../src/devices/index.js';
-import { SCENE_ACTIONS } from '../src/scenes.js';
-import { WIDGETS } from '../src/widgets.js';
-import { DEFAULT_CONFIG } from '../src/config.js';
+import { ACTIONS } from '../src/app.js';
+import { createWidgets } from '../src/widgets.js';
+import { DEFAULT_CONFIG, POLL_INTERVAL_HOURS } from '../src/config.js';
 
 const manifest = JSON.parse(
   await readFile(new URL('../gladys-assistant-integration.json', import.meta.url), 'utf8'),
@@ -29,8 +28,11 @@ const allFields = [
   ...(manifest.widgets ?? []).flatMap((widget) => widget.settings ?? []),
 ];
 
-// Actions registered outside the blueprints (see index.js).
-const REGISTRY_LEVEL_ACTIONS = ['identify'];
+// The integration declares neither scene triggers nor scene actions (nothing
+// in a meter reading is an event worth a trigger).
+const SCENE_TRIGGER_KEYS = [];
+const SCENE_ACTIONS = {};
+const WIDGETS = createWidgets({});
 
 // Manifest fields older Gladys releases reject as unknown, with the first
 // release accepting them. The store validator refuses a manifest whose
@@ -58,12 +60,12 @@ function isAtLeast(version, required) {
 }
 
 test('every manifest action has a registered handler', () => {
-  const handled = new Set([
-    ...DEVICE_BLUEPRINTS.flatMap((bp) => Object.keys(bp.actions ?? {})),
-    ...REGISTRY_LEVEL_ACTIONS,
-  ]);
+  const handled = new Set(Object.values(ACTIONS));
   for (const action of manifest.actions ?? []) {
     assert.ok(handled.has(action.key), `manifest action "${action.key}" has no handler`);
+  }
+  for (const key of handled) {
+    assert.ok(keysOf(manifest.actions).includes(key), `action "${key}" is not declared`);
   }
 });
 
@@ -82,7 +84,7 @@ test('declaring catalog categories requires Gladys >= 4.86.0', () => {
 
 test('declaring scene triggers, scene actions or widgets requires Gladys >= 5.1.0', () => {
   const declared = CAPABILITY_FIELDS.filter((field) => manifest[field] !== undefined);
-  assert.ok(declared.length > 0, 'the template demonstrates the capability fields');
+  assert.ok(declared.length > 0, 'the integration declares a widget');
   assert.ok(
     isAtLeast(minGladysVersion(), CAPABILITY_MIN_GLADYS_VERSION),
     `${declared.join(', ')} requires gladys_version >= 5.1.0, got "${manifest.gladys_version}"`,
@@ -135,7 +137,7 @@ test('config_schema defaults stay consistent with DEFAULT_CONFIG', () => {
 
 test('section fields are purely presentational', () => {
   const sections = manifest.config_schema.filter((f) => f.type === 'section');
-  assert.ok(sections.length > 0, 'the template demonstrates at least one section block');
+  assert.ok(sections.length > 0, 'the form opens with an intro section');
   for (const section of sections) {
     // A section stores NO value: declaring `required`, `default` or
     // `placeholder` on it rejects the manifest, and its key must never leak
@@ -159,9 +161,7 @@ test('section fields are purely presentational', () => {
 });
 
 test('dynamic selects declare a source and no static options', () => {
-  const dynamicSelects = allFields.filter((f) => f.source !== undefined);
-  assert.ok(dynamicSelects.length > 0, 'the template demonstrates a dynamic select');
-  for (const field of dynamicSelects) {
+  for (const field of allFields.filter((f) => f.source !== undefined)) {
     assert.equal(field.source, 'devices', 'the only core-defined source in V1 is "devices"');
     assert.equal(
       field.options,
@@ -169,6 +169,39 @@ test('dynamic selects declare a source and no static options', () => {
       `field "${field.key}": declaring source and options together rejects the manifest`,
     );
   }
+});
+
+test('the reading interval field matches the code bounds, in whole hours', () => {
+  const field = manifest.config_schema.find((f) => f.key === 'poll_interval_hours');
+  assert.equal(field.type, 'number');
+  assert.equal(field.min, POLL_INTERVAL_HOURS.MIN);
+  assert.equal(field.max, POLL_INTERVAL_HOURS.MAX);
+  // Number fields render without `step`: integers only.
+  for (const value of [field.min, field.max, field.default]) {
+    assert.ok(Number.isInteger(value));
+  }
+});
+
+test('credentials are secret fields, never in an action form', () => {
+  for (const key of ['password', 'session_cookie']) {
+    const field = manifest.config_schema.find((f) => f.key === key);
+    assert.equal(field.type, 'secret', `${key} must be a secret field`);
+    assert.equal(field.default, undefined);
+  }
+  for (const action of manifest.actions) {
+    assert.ok(!(action.fields ?? []).some((f) => f.type === 'secret'));
+  }
+});
+
+test('identity: cloud transport, energy shelf, image and repository of guim31', () => {
+  assert.deepEqual(manifest.transports, ['cloud']);
+  assert.deepEqual(manifest.categories, ['energy']);
+  assert.match(manifest.docker_image, /^ghcr\.io\/guim31\/gladys-ista:/);
+  assert.equal(
+    manifest.cover_image,
+    'https://raw.githubusercontent.com/guim31/gladys-ista/main/cover.png',
+  );
+  assert.equal(manifest.scene_triggers, undefined, 'no invented trigger');
 });
 
 test('the manifest version is the package version, and the image is tagged with it', () => {

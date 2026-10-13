@@ -1,177 +1,248 @@
 {
   "manifest_version": 1,
   "type": "device",
-  "name": "Demo Devices Template",
+  "name": "ista Web'conso (France)",
   "description": {
-    "en": "Starter template showing sensors, a switch, a dimmable light and a smart plug.",
-    "fr": "Template de démarrage : capteurs, interrupteur, lampe variable et prise connectée."
+    "en": "Heat cost allocators and water meters read by ista in France, from the Web'conso resident portal.",
+    "fr": "Répartiteurs de chauffage et compteurs d'eau relevés par ista, depuis le portail résident Web'conso.",
+    "de": "Heizkostenverteiler und Wasserzähler von ista in Frankreich, über das Bewohnerportal Web'conso.",
+    "es": "Repartidores de calefacción y contadores de agua de ista en Francia, desde el portal Web'conso."
   },
   "version": "1.0.0",
-  "docker_image": "ghcr.io/gladysassistant/integration-template-js:1.0.0",
+  "docker_image": "ghcr.io/guim31/gladys-ista:1.0.0",
   "gladys_version": ">=5.1.0",
-  "cover_image": "https://raw.githubusercontent.com/GladysAssistant/integration-template-js/master/cover.png",
-  "categories": ["lighting", "security", "environment"],
-  "transports": ["local", "cloud"],
+  "cover_image": "https://raw.githubusercontent.com/guim31/gladys-ista/main/cover.png",
+  "categories": ["energy"],
+  "transports": ["cloud"],
   "config_schema": [
     {
       "key": "intro",
       "type": "section",
-      "label": { "en": "Getting started", "fr": "Pour commencer" },
+      "label": {
+        "en": "Your ista Web'conso account",
+        "fr": "Votre compte ista Web'conso",
+        "de": "Dein ista-Web'conso-Konto",
+        "es": "Su cuenta ista Web'conso"
+      },
       "description": {
-        "en": "The demo weather station reads real data from the free Open-Meteo API: pick the coordinates to observe. No account, no API key.",
-        "fr": "La station météo de démonstration lit de vraies données via l'API gratuite Open-Meteo : choisissez les coordonnées à observer. Pas de compte, pas de clé d'API."
+        "en": "Use the account of the ista resident portal (France). The portal has no public API: the integration signs in like your browser and may break when ista changes the site. Not affiliated with ista. Developed without an account: feedback welcome.",
+        "fr": "Utilisez le compte du portail résident ista (France). Le portail n'a pas d'API publique : l'intégration se connecte comme votre navigateur et peut cesser de fonctionner quand ista modifie le site. Non affiliée à ista. Développée sans compte : retours bienvenus.",
+        "de": "Nutze das Konto des ista-Bewohnerportals (Frankreich). Das Portal hat keine öffentliche API: Die Integration meldet sich wie dein Browser an und kann ausfallen, wenn ista die Website ändert. Nicht mit ista verbunden. Ohne Konto entwickelt: Rückmeldungen willkommen.",
+        "es": "Utilice la cuenta del portal de residentes de ista (Francia). El portal no tiene API pública: la integración inicia sesión como su navegador y puede dejar de funcionar cuando ista modifique el sitio. Sin afiliación con ista. Desarrollada sin cuenta: se agradecen sus comentarios."
       },
       "links": [
         {
-          "url": "https://open-meteo.com/en/docs",
-          "label": { "en": "Open-Meteo documentation", "fr": "Documentation Open-Meteo" }
+          "url": "https://www.ista-webconso.fr",
+          "label": {
+            "en": "ista Web'conso portal",
+            "fr": "Portail ista Web'conso",
+            "de": "ista-Web'conso-Portal",
+            "es": "Portal ista Web'conso"
+          }
         }
       ]
     },
     {
-      "key": "latitude",
-      "type": "number",
-      "label": { "en": "Latitude", "fr": "Latitude" },
-      "description": {
-        "en": "Latitude used for the demo weather sensor.",
-        "fr": "Latitude utilisée par le capteur météo de démonstration."
-      },
-      "placeholder": { "en": "e.g. 48.8566", "fr": "ex. 48.8566" },
-      "required": true,
-      "default": 48.8566,
-      "min": -90,
-      "max": 90
-    },
-    {
-      "key": "longitude",
-      "type": "number",
-      "label": { "en": "Longitude", "fr": "Longitude" },
-      "description": {
-        "en": "Longitude used for the demo weather sensor.",
-        "fr": "Longitude utilisée par le capteur météo de démonstration."
-      },
-      "placeholder": { "en": "e.g. 2.3522", "fr": "ex. 2.3522" },
-      "required": true,
-      "default": 2.3522,
-      "min": -180,
-      "max": 180
-    },
-    {
-      "key": "unit",
+      "key": "auth_mode",
       "type": "select",
-      "label": { "en": "Temperature unit", "fr": "Unité de température" },
+      "display": "radio",
+      "label": {
+        "en": "Sign-in method",
+        "fr": "Méthode de connexion",
+        "de": "Anmeldemethode",
+        "es": "Método de inicio de sesión"
+      },
+      "description": {
+        "en": "E-mail and password first. If the portal refuses them (captcha, second factor), copy a session cookie from your browser instead: it expires, so it is a fallback.",
+        "fr": "E-mail et mot de passe d'abord. Si le portail les refuse (captcha, second facteur), copiez plutôt un cookie de session depuis votre navigateur : il expire, c'est une solution de repli.",
+        "de": "Zuerst E-Mail und Passwort. Lehnt das Portal sie ab (Captcha, zweiter Faktor), kopiere stattdessen ein Sitzungs-Cookie aus deinem Browser: Es läuft ab, es ist nur eine Notlösung.",
+        "es": "Primero correo y contraseña. Si el portal los rechaza (captcha, segundo factor), copie en su lugar una cookie de sesión desde su navegador: caduca, es una solución de emergencia."
+      },
       "required": false,
-      "default": "celsius",
+      "default": "credentials",
       "options": [
-        { "value": "celsius", "label": { "en": "Celsius", "fr": "Celsius" } },
-        { "value": "fahrenheit", "label": { "en": "Fahrenheit", "fr": "Fahrenheit" } }
+        {
+          "value": "credentials",
+          "label": {
+            "en": "E-mail and password",
+            "fr": "E-mail et mot de passe",
+            "de": "E-Mail und Passwort",
+            "es": "Correo y contraseña"
+          }
+        },
+        {
+          "value": "cookie",
+          "label": {
+            "en": "Session cookie (fallback)",
+            "fr": "Cookie de session (repli)",
+            "de": "Sitzungs-Cookie (Notlösung)",
+            "es": "Cookie de sesión (emergencia)"
+          }
+        }
       ]
     },
     {
-      "key": "poll_frequency",
-      "type": "number",
-      "label": { "en": "Refresh interval (s)", "fr": "Intervalle de rafraîchissement (s)" },
+      "key": "email",
+      "type": "string",
+      "label": {
+        "en": "E-mail",
+        "fr": "E-mail",
+        "de": "E-Mail",
+        "es": "Correo electrónico"
+      },
       "description": {
-        "en": "How often sensors are polled, in seconds (one minute minimum).",
-        "fr": "Fréquence d'interrogation des capteurs, en secondes (une minute minimum)."
+        "en": "The e-mail of your resident space.",
+        "fr": "L'e-mail de votre espace résident.",
+        "de": "Die E-Mail deines Bewohnerbereichs.",
+        "es": "El correo de su espacio de residente."
+      },
+      "placeholder": {
+        "en": "name@example.com",
+        "fr": "nom@exemple.fr",
+        "de": "name@beispiel.de",
+        "es": "nombre@ejemplo.es"
+      },
+      "required": false
+    },
+    {
+      "key": "password",
+      "type": "secret",
+      "label": {
+        "en": "Password",
+        "fr": "Mot de passe",
+        "de": "Passwort",
+        "es": "Contraseña"
+      },
+      "required": false
+    },
+    {
+      "key": "session_cookie",
+      "type": "secret",
+      "label": {
+        "en": "Session cookie",
+        "fr": "Cookie de session",
+        "de": "Sitzungs-Cookie",
+        "es": "Cookie de sesión"
+      },
+      "description": {
+        "en": "Session cookie mode only: the JSESSIONID value, or the whole Cookie header of a portal request. The documentation shows how to copy it.",
+        "fr": "Mode cookie de session seulement : la valeur JSESSIONID, ou tout l'en-tête Cookie d'une requête du portail. La documentation explique comment le copier.",
+        "de": "Nur im Modus Sitzungs-Cookie: der Wert JSESSIONID oder der ganze Cookie-Header einer Portal-Anfrage. Die Dokumentation zeigt dir, wie du ihn kopierst.",
+        "es": "Solo en el modo cookie de sesión: el valor JSESSIONID, o toda la cabecera Cookie de una petición del portal. La documentación explica cómo copiarla."
+      },
+      "placeholder": {
+        "en": "JSESSIONID=…",
+        "fr": "JSESSIONID=…",
+        "de": "JSESSIONID=…",
+        "es": "JSESSIONID=…"
+      },
+      "required": false
+    },
+    {
+      "key": "poll_interval_hours",
+      "type": "number",
+      "label": {
+        "en": "Reading interval (hours)",
+        "fr": "Intervalle de relevé (heures)",
+        "de": "Ableseintervall (Stunden)",
+        "es": "Intervalo de lectura (horas)"
+      },
+      "description": {
+        "en": "How often the portal is read, 3 to 24 hours. ista updates the readings once a day at most, often once a week: reading more often only loads the portal.",
+        "fr": "Fréquence de lecture du portail, de 3 à 24 heures. ista met à jour les relevés une fois par jour au plus, souvent une fois par semaine : lire plus souvent ne fait que charger le portail.",
+        "de": "Wie oft das Portal gelesen wird, 3 bis 24 Stunden. ista aktualisiert die Werte höchstens einmal am Tag, oft einmal pro Woche: Häufigeres Lesen belastet nur das Portal.",
+        "es": "Frecuencia de lectura del portal, de 3 a 24 horas. ista actualiza las lecturas como mucho una vez al día, a menudo una vez por semana: leer más a menudo solo sobrecarga el portal."
       },
       "required": false,
-      "default": 300,
-      "min": 60,
-      "max": 3600
+      "default": 12,
+      "min": 3,
+      "max": 24
+    },
+    {
+      "key": "language",
+      "type": "select",
+      "label": {
+        "en": "Language of the feature names",
+        "fr": "Langue des noms de fonctionnalités",
+        "de": "Sprache der Funktionsnamen",
+        "es": "Idioma de los nombres de funciones"
+      },
+      "description": {
+        "en": "Gladys does not tell an integration your language: the device and feature names are written in this one, when the device is created.",
+        "fr": "Gladys ne transmet pas votre langue à une intégration : les noms de l'appareil et des fonctionnalités sont écrits dans celle-ci, à la création de l'appareil.",
+        "de": "Gladys teilt einer Integration deine Sprache nicht mit: Die Namen von Gerät und Funktionen werden beim Anlegen des Geräts in dieser Sprache geschrieben.",
+        "es": "Gladys no comunica su idioma a una integración: los nombres del dispositivo y de las funciones se escriben en este, al crear el dispositivo."
+      },
+      "required": false,
+      "default": "fr",
+      "options": [
+        {
+          "value": "en",
+          "label": {
+            "en": "English",
+            "fr": "Anglais",
+            "de": "Englisch",
+            "es": "Inglés"
+          }
+        },
+        {
+          "value": "fr",
+          "label": {
+            "en": "French",
+            "fr": "Français",
+            "de": "Französisch",
+            "es": "Francés"
+          }
+        },
+        {
+          "value": "de",
+          "label": {
+            "en": "German",
+            "fr": "Allemand",
+            "de": "Deutsch",
+            "es": "Alemán"
+          }
+        },
+        {
+          "value": "es",
+          "label": {
+            "en": "Spanish",
+            "fr": "Espagnol",
+            "de": "Spanisch",
+            "es": "Español"
+          }
+        }
+      ]
     }
   ],
   "actions": [
     {
-      "key": "test_weather",
-      "label": { "en": "Test the weather provider", "fr": "Tester le fournisseur météo" },
-      "timeout_seconds": 30
-    },
-    {
-      "key": "identify",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ]
-    }
-  ],
-  "scene_triggers": [
-    {
-      "key": "motion_detected",
-      "label": { "en": "Motion detected", "fr": "Mouvement détecté" },
-      "description": {
-        "en": "A demo motion sensor saw a person or an animal move.",
-        "fr": "Un détecteur de démonstration a vu bouger une personne ou un animal."
+      "key": "test_connection",
+      "label": {
+        "en": "Test the connection and read now",
+        "fr": "Tester la connexion et relever maintenant",
+        "de": "Verbindung testen und jetzt ablesen",
+        "es": "Probar la conexión y leer ahora"
       },
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Sensor", "fr": "Détecteur" }
-        },
-        {
-          "key": "target",
-          "type": "multi_select",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" },
-          "options": [
-            { "value": "person", "label": { "en": "Person", "fr": "Personne" } },
-            { "value": "animal", "label": { "en": "Animal", "fr": "Animal" } }
-          ]
-        }
-      ],
-      "variables": [
-        {
-          "key": "target",
-          "type": "string",
-          "label": { "en": "What moved", "fr": "Ce qui a bougé" }
-        }
-      ]
-    }
-  ],
-  "scene_actions": [
-    {
-      "key": "identify_device",
-      "label": { "en": "Identify a device", "fr": "Identifier un appareil" },
-      "description": {
-        "en": "Make a device signal itself (the demo light blinks).",
-        "fr": "Fait se signaler un appareil (la lampe de démonstration clignote)."
-      },
-      "timeout_seconds": 15,
-      "fields": [
-        {
-          "key": "device",
-          "type": "select",
-          "source": "devices",
-          "label": { "en": "Device", "fr": "Appareil" },
-          "required": true
-        }
-      ],
-      "outputs": [
-        {
-          "key": "signalled",
-          "type": "boolean",
-          "label": { "en": "Device signalled", "fr": "Appareil signalé" }
-        }
-      ]
+      "timeout_seconds": 120
     }
   ],
   "widgets": [
     {
-      "key": "demo_status",
-      "label": { "en": "Demo status", "fr": "État de la démo" },
-      "description": {
-        "en": "Live temperature and plug power, plug connection and observed location.",
-        "fr": "Température et puissance en direct, connexion de la prise, position observée."
+      "key": "dwelling",
+      "label": {
+        "en": "ista consumption",
+        "fr": "Consommation ista",
+        "de": "ista-Verbrauch",
+        "es": "Consumo ista"
       },
-      "icon": "activity",
-      "action_timeout_seconds": 15
+      "description": {
+        "en": "Heating units of the latest day, water indexes and the heating units per day.",
+        "fr": "Unités de chauffage du dernier jour, index d'eau et unités de chauffage par jour.",
+        "de": "Heizeinheiten des letzten Tages, Wasserstände und Heizeinheiten pro Tag.",
+        "es": "Unidades de calefacción del último día, índices de agua y unidades de calefacción por día."
+      },
+      "icon": "droplet"
     }
   ]
 }
