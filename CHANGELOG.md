@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-13
+
 ### Added
 
 - Readings of the ista Web'conso resident portal (France): one "ista
@@ -24,4 +26,5 @@ the notes of the version's GitHub Release.
   dashboard widget.
 - Every text in English, French, German and Spanish.
 
-[Unreleased]: https://github.com/guim31/gladys-ista/commits/main
+[Unreleased]: https://github.com/guim31/gladys-ista/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/guim31/gladys-ista/releases/tag/v1.0.1
