@@ -19,6 +19,14 @@ export const ACTIONS = { TEST_CONNECTION: 'test_connection' };
 /**
  * Result of the "Test the connection" action: what the portal listed.
  */
+/** An action failure whose message stays multi-language: the core relays it as is. */
+export class ActionFailure extends Error {
+  constructor(text) {
+    super(text.en);
+    this.message = text;
+  }
+}
+
 export function describeConnection(sync, result) {
   if (!result.ok) {
     const textKey = sync.state.status?.text ?? 'status_unreachable';
@@ -83,7 +91,13 @@ export function registerHandlers(gladys, options = {}) {
     logger.info(
       `Connection test: ${result.ok ? 'OK' : `failed (${sync.state.status?.text ?? 'unknown'})`}`,
     );
-    return describeConnection(sync, result);
+    const message = describeConnection(sync, result);
+    if (!result.ok) {
+      // A failure resolved like a success was shown in green (Jluc, t/11109/22): throw it, with
+      // its four languages, so that Gladys shows it in red.
+      throw new ActionFailure(message);
+    }
+    return message;
   });
 
   for (const [key, widget] of Object.entries(createWidgets(sync))) {

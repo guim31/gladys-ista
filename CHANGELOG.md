@@ -10,6 +10,11 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Fixed
+
+- **Test the connection and read now** showed a failure (expired cookie, refused password…) in
+  green: it now fails, so Gladys shows the message in red.
+
 ## [1.1.1] - 2026-11-08
 
 ### Fixed
