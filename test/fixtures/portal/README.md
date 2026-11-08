@@ -1,17 +1,18 @@
 # Portal fixtures
 
-Reconstructed, anonymized answers of the ista Web'conso resident portal. No
-real account was used: the structure (field names, nesting) follows what the
-public projects credited in the main README read from the portal, and every
-value (counting point numbers, serials, rooms, indexes) is invented.
+Reconstructed, anonymized pages of the ista Web'conso resident portal. Every
+value (meter numbers, locations, indexes, dates, address, tokens) is invented.
 
-- `heating-day.json`: the heating consumption page for one day, three heat cost
-  allocators.
-- `heating-day-pending.json`: the same page for a day the portal has not filled
-  in yet (`is_null`).
-- `cold-water-day.json`: a water answer of the same shape. **Hypothetical**:
-  nobody has seen a real water answer yet (see `DISPATCHES` in
-  `src/ista/client.js`).
+- `index-page.html`: the "index à la demande" page (`ficheIndexDemande.do`),
+  written by hand after the structure of live pages a resident shared on
+  2026-11-08 (the form, its hidden fields, the layout of the tags). A template:
+  `test/helpers/fakePortal.js` fills its `{{…}}` placeholders (CSRF token, what
+  the dwelling has, dates, search results).
+- `index-water-meters.html`: the meter blocks of a water search, same origin:
+  one cold water meter (real index), one hot water meter (estimated index).
+- `index-heating-tab.html`, `index-heating-meters.html`: the heating tab and a
+  heating search. **Hypothetical**: ids and dispatch from the page script, the
+  rest assumed like the water tab; nobody has seen them yet.
 - `public-home.html`: the portal's public home page, where the bare resident
   space URL lands. It has no form, only a "Se connecter" link
   (`home.do?dispatch=authenticate`) that redirects to the login form.

@@ -13,8 +13,36 @@ export function fixture(name) {
   return readFileSync(new URL(name, FIXTURES), 'utf8');
 }
 
-export function jsonFixture(name) {
-  return JSON.parse(fixture(name));
+/** `DD/MM/YYYY` of a `YYYYMMDD` date. */
+/**
+ * The index page as the portal renders it, from the fixture templates.
+ * @param {object} values placeholders: dispatch, csrf, water, heating,
+ *   heatingIndex, dateMax, heatingMax, from, day, waterResult, heatingResult
+ */
+export function renderIndexPage(values) {
+  const heatingTab = values.heatingIndex
+    ? fixture('index-heating-tab.html').replace('{{HEATING_MAX}}', values.heatingMax ?? '') +
+      (values.heatingResult ?? '')
+    : '';
+  const meters = (values.waterResult ?? '').match(/class="le-compteur"/g)?.length ?? 0;
+  return fixture('index-page.html')
+    .replace('{{WATER_RESULT}}', values.waterResult ?? '')
+    .replace('{{HEATING_TAB}}', heatingTab)
+    .replaceAll('{{CSRF}}', values.csrf)
+    .replaceAll('{{DISPATCH}}', values.dispatch ?? 'init')
+    .replaceAll('{{WATER}}', String(values.water ?? true))
+    .replaceAll('{{HEATING}}', String(values.heating ?? false))
+    .replaceAll('{{HEATING_INDEX}}', String(values.heatingIndex ?? false))
+    .replaceAll('{{METERS}}', String(meters))
+    .replaceAll('{{CHOSEN}}', values.day ? 'true' : 'false')
+    .replaceAll('{{FROM}}', values.from ?? '')
+    .replaceAll('{{DAY}}', values.day ?? '')
+    .replaceAll('{{DATE_MAX}}', values.dateMax ?? '');
+}
+
+/** The meter blocks of a search answer, dated with the period asked. */
+export function meterBlocks(name, from, day) {
+  return fixture(name).replaceAll('{{FROM}}', from).replaceAll('{{DAY}}', day);
 }
 
 // Fake secrets: the tests check none of them ever reaches a log line.
@@ -52,13 +80,6 @@ function html(body, setCookies = [], status = 200) {
   return new Response(body, { status, headers });
 }
 
-function json(value) {
-  return new Response(JSON.stringify(value), {
-    status: 200,
-    headers: { 'content-type': 'application/json;charset=UTF-8' },
-  });
-}
-
 /**
  * @param {object} [options]
  * @param {string} [options.loginPage] fixture served as the login page
@@ -66,28 +87,55 @@ function json(value) {
  *   (a second factor page, for instance); the portal otherwise
  * @param {boolean} [options.homeFirst] the first sign-in link lands on the
  *   public home page again (the client must follow its link)
- * @param {Function} [options.answer] `(dispatch, day) => object | Response`,
- *   the consumption answer; defaults to the heating fixture for heating and a
- *   404 for water
+ * @param {object} [options.index] what the index page offers: `water`
+ *   (true), `heating` and `heatingIndex` (false), `dateMax` (`YYYYMMDD`,
+ *   20261010), `heatingMax` (`YYYY/MM/DD`)
+ * @param {Function} [options.answer] `(dispatch, form) => string | Response`,
+ *   the meter blocks of a search (form: the posted URLSearchParams); defaults
+ *   to the water fixture for water and the heating one for heating
  */
 export function createFakePortal(options = {}) {
   const portal = {
     requests: [],
+    searches: [],
     logins: 0,
     authenticateHits: 0,
     sessions: new Set(),
+    index: {
+      water: true,
+      heating: false,
+      heatingIndex: false,
+      dateMax: '20261010',
+      ...options.index,
+    },
     expireSessions() {
       portal.sessions.clear();
     },
   };
   let sessionCounter = 0;
+  let csrfCounter = 0;
+  const csrfTokens = new Set();
   const loginPage = options.loginPage ?? 'login-page.html';
   const answer =
     options.answer ??
-    ((dispatch) =>
-      dispatch === 'calculeConsommationChauffageRfcPourLogement'
-        ? jsonFixture('heating-day.json')
-        : new Response('<html>Erreur</html>', { status: 404 }));
+    ((dispatch, form) =>
+      dispatch === 'voirIndexDemandeChauffageRfc'
+        ? meterBlocks(
+            'index-heating-meters.html',
+            form.get('dateDebutPeriodeIndexChauffageRfc'),
+            form.get('dateIndexDemandeChauffageRfc'),
+          )
+        : meterBlocks(
+            'index-water-meters.html',
+            form.get('dateDebutPeriodeIndex'),
+            form.get('dateIndexDemande'),
+          ));
+  const indexPage = (extra = {}) => {
+    csrfCounter += 1;
+    const csrf = `csrf-${csrfCounter}`;
+    csrfTokens.add(csrf);
+    return html(renderIndexPage({ ...portal.index, csrf, ...extra }));
+  };
 
   portal.fetch = async (input, init = {}) => {
     const url = new URL(input);
@@ -145,12 +193,34 @@ export function createFakePortal(options = {}) {
         'SRV=web01; Path=/',
       ]);
     }
-    if (url.origin === PORTAL && url.pathname === '/espace-client-v2/occupant/ficheLogement.do') {
+    if (
+      url.origin === PORTAL &&
+      url.pathname === '/espace-client-v2/occupant/ficheIndexDemande.do'
+    ) {
       if (!signedIn) {
         return toHome();
       }
-      const result = answer(url.searchParams.get('dispatch'), url.searchParams.get('start'));
-      return result instanceof Response ? result : json(result);
+      if (method === 'GET') {
+        return indexPage();
+      }
+      const form = new URLSearchParams(init.body);
+      portal.searches.push(form);
+      if (!csrfTokens.has(form.get('_csrf'))) {
+        return html('<html>Forbidden</html>', [], 403);
+      }
+      const dispatch = form.get('dispatch');
+      const result = answer(dispatch, form);
+      if (result instanceof Response) {
+        return result;
+      }
+      return dispatch === 'voirIndexDemandeChauffageRfc'
+        ? indexPage({ dispatch, heatingResult: result })
+        : indexPage({
+            dispatch,
+            waterResult: result,
+            from: form.get('dateDebutPeriodeIndex'),
+            day: form.get('dateIndexDemande'),
+          });
     }
     return html('<html>Not found</html>', [], 404);
   };

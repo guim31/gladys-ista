@@ -33,10 +33,10 @@ pushing.
 ```
 index.js                          SDK wiring only: registerHandlers(gladys) then connect()
 src/app.js                        handlers: scan, poll fallback, action, widget, config, lifecycle
-src/sync.js                       container timer, days to read, dated states, connection status
-src/ista/client.js                portal client: Keycloak sign-in, session, consumption pages
+src/sync.js                       container timer, latest reading date, dated states, connection status
+src/ista/client.js                portal client: Keycloak sign-in, session, index page search
 src/ista/cookies.js               cookie jar + parsing of a pasted browser cookie
-src/ista/parse.js                 portal JSON answers -> counting points
+src/ista/parse.js                 index page form and meter blocks (HTML) -> meters
 src/devices/dwelling.js           the one Gladys device and its features
 src/widgets.js                    dashboard widget handler (manifest `widgets`)
 src/i18n.js                       every text sent to Gladys, en/fr/de/es
@@ -46,7 +46,7 @@ gladys-assistant-integration.json manifest: name, config_schema, actions, image.
 docs/en.md, docs/fr.md            user documentation, re-hosted by Gladys (mandatory)
 docs/de.md, docs/es.md            same, optional (published by the store since Gladys 5.2)
 test/                             node --test, SDK fake Gladys + test/helpers/fakePortal.js
-test/fixtures/portal/             reconstructed, anonymized portal answers (no real account)
+test/fixtures/portal/             reconstructed, anonymized portal pages (index-*.html: live layout)
 .github/scripts/release.mjs       release helpers (manifest bump, changelog), tested in test/
 ```
 
@@ -111,7 +111,32 @@ code de ce dépôt. Compléter ce fichier quand un nouveau piège est découvert
   « Se connecter » (`?dispatch=authenticate`) redirige vers le Keycloak
   `login.ista.com/realms/dsp-webconso-fr` (`username`, `password`, `credentialId` caché, pas de
   captcha). Partir de `dispatch=authenticate`, et traiter une page `public/` comme une session
-  perdue.
+  perdue. **Connexion confirmée par un résident le 08/11/2026** (mot de passe comme cookie).
+- **Relevés ista : la page « index à la demande »** (vérifiée le 08/11/2026 sur les pages d'un
+  résident, fil 11109). L'ancienne page JSON `ficheLogement.do?dispatch=calculeConsommation…`
+  (devinée d'après un projet de 2025) répond du HTML : abandonnée en 1.1.0. Parcours :
+  `GET occupant/ficheIndexDemande.do` → formulaire `ficheIndexDemandeOccupantForm` (`_csrf`,
+  `dateMinIndex`/`dateMaxIndex` en AAAAMMJJ, drapeaux `logement.eauDisponible`,
+  `indexDemandeEauDisponible`, `logement.chauffageDisponible`,
+  `indexDemandeChauffageRfcDisponible`) ; recherche = POST du **même formulaire, tous champs
+  renvoyés**, `dispatch=voirIndexDemande`, `dateIndexDemande` et `dateDebutPeriodeIndex` en
+  JJ/MM/AAAA (l'input visible de la date de début n'a pas de `name` : c'est le champ caché qui
+  part). Réponse : un `div.le-compteur` par compteur (« EAU FROIDE »/« EAU CHAUDE », période
+  « JJ/MM/AAAA au JJ/MM/AAAA », lignes `div.key`/`div.value` : « Numéro du compteur »,
+  « Emplacement », « Index relevé » à point décimal, « Index réel/estimé » REEL/ESTIME,
+  « Consommation (m3 et litres) » à virgule). Après la recherche, l'input `dateIndexDemande`
+  disparaît de la page. Script de la page :
+  `/espace-client-v2/js/occupant/ficheIndexDemandeOccupant.js` (public, lisible sans compte ;
+  `global.soumettre(x)` = `dispatch=x` puis submit).
+- **Chauffage ista non vérifié** : `voirIndexDemandeChauffageRfc`, champs de l'onglet chauffage
+  trouvés par leur id (`choixDateIndexDemandeChauffageRfc`,
+  `choixDateDebutPeriodeIndexChauffageRfc`, bornes `debut/finPeriodeAvecDonneesChauffageRfc`),
+  structure de réponse supposée comme l'eau. À confirmer par un résident chauffé (échantillon
+  anonymisé de la réponse).
+- **Échantillons réels** des résidents : jamais dans le dépôt. Fixtures
+  écrites à la main d'après leur structure, valeurs inventées ; `test/logs.test.js` vérifie
+  qu'aucun numéro, index ni emplacement n'atteint les journaux. Les `index-*.html` sont exclus
+  de Prettier pour garder la mise en page du portail (valeurs sur leur propre ligne).
 - Le dépôt est **public** : aucun secret, aucune adresse ni détail d'infrastructure privée, ni
   ici, ni dans les tests, ni dans les captures.
 

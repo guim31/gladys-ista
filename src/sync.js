@@ -1,30 +1,29 @@
 // -----------------------------------------------------------------------------
 // Reading the portal and feeding Gladys.
 //
-// The portal publishes one reading per day, often with a delay of several
-// days (many buildings are read weekly). So the container, not Gladys, drives
-// the pace: a timer reads the portal every few hours (12 by default, 3 to 24),
-// asks only for the days it does not have yet (7 days back at most), and
-// publishes each reading DATED with its day, so the Gladys charts show the
-// consumption on the right day, not on the day it was fetched.
+// The portal gives the meters' indexes on its "index à la demande" page, for
+// any day up to its latest reading (often a few days old). So the container,
+// not Gladys, drives the pace: a timer opens that page every few hours (12 by
+// default, 3 to 24) and, when its latest date is newer than the last reading
+// published, asks for the indexes of that date, over a one-day period. Each
+// index is published DATED with its reading date, so the Gladys charts show
+// it on the right day, not on the day it was fetched.
 //
-// A day the portal has not filled in yet stops the reading of that fluid: it
-// is asked again at the next run, and so are the days after it. That keeps the
-// load on the portal to a handful of small requests per run.
+// That is two small requests per run (three with heating), and only one when
+// the portal has nothing new.
 // -----------------------------------------------------------------------------
 
 import { createHash } from 'node:crypto';
 import { createLogger } from '@gladysassistant/integration-sdk';
-import { AuthError, AUTH_ERRORS, IstaClient, PortalError } from './ista/client.js';
-import { KINDS, UnexpectedAnswerError } from './ista/parse.js';
-import { buildDevice, deviceIds, statesOfDay } from './devices/dwelling.js';
+import { AuthError, AUTH_ERRORS, IstaClient } from './ista/client.js';
+import { KINDS, UnexpectedAnswerError, addDays } from './ista/parse.js';
+import { FEATURE_KEYS, buildDevice, deviceIds, statesOfDay } from './devices/dwelling.js';
 import { hasCredentials } from './config.js';
 import { allLanguages } from './i18n.js';
 
 // Key of the dashboard widget (manifest `widgets`), nudged after each reading.
 export const DWELLING_WIDGET = 'dwelling';
 
-export const BACKFILL_DAYS = 7;
 export const REQUEST_GAP_MS = 2000;
 export const FIRST_RUN_DELAY_MS = 10_000;
 export const RETRY_AFTER_ERROR_MS = 60 * 60 * 1000;
@@ -34,14 +33,15 @@ export const MAX_RECENT_STATES = 250;
 const DAILY_HISTORY_DAYS = 31;
 const STATES_PER_REQUEST = 100;
 
-export const WATER_STATUS = {
-  UNKNOWN: 'unknown',
-  AVAILABLE: 'available',
-  UNAVAILABLE: 'unavailable',
-};
+export { addDays };
 
-const FLUIDS = [KINDS.HEATING, KINDS.COLD_WATER, KINDS.HOT_WATER];
 const WATER_KINDS = [KINDS.COLD_WATER, KINDS.HOT_WATER];
+// Features that add up several meters.
+const TOTAL_KEYS = new Set([
+  FEATURE_KEYS.HEATING_DAILY,
+  FEATURE_KEYS.COLD_WATER_TOTAL,
+  FEATURE_KEYS.HOT_WATER_TOTAL,
+]);
 
 const AUTH_STATUS_TEXTS = {
   [AUTH_ERRORS.NO_CREDENTIALS]: 'status_not_configured',
@@ -59,12 +59,6 @@ export function localDay(date) {
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 }
 
-export function addDays(day, count) {
-  const date = new Date(`${day}T12:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + count);
-  return date.toISOString().slice(0, 10);
-}
-
 /** The instant a day's reading is stamped with: the end of that local day. */
 export function stateInstant(day) {
   return new Date(`${day}T23:59:00`).toISOString();
@@ -74,7 +68,6 @@ export function emptyState() {
   return {
     points: [],
     lastDay: {},
-    water: { [KINDS.COLD_WATER]: WATER_STATUS.UNKNOWN, [KINDS.HOT_WATER]: WATER_STATUS.UNKNOWN },
     recent: [],
     daily: [],
     status: null,
@@ -116,8 +109,10 @@ export class IstaSync {
     // when a failure starts and one when it ends, not one per attempt. In
     // memory only: a restart logs a lasting failure again, once.
     this.failure = null;
-    // Water fluids whose reading failure was already logged.
-    this.waterFailures = new Set();
+    // Whether the heating failure (unverified page) was already logged, and
+    // the heating notice (installed, not offered by the index page).
+    this.heatingFailure = false;
+    this.heatingNoticeLogged = false;
   }
 
   /**
@@ -144,18 +139,12 @@ export class IstaSync {
         fetch: this.fetch,
         sessionStore: this.store.session,
       });
-      // Another account: forget what the previous one listed. Water is probed
-      // again in any case (the portal may answer differently once signed in).
+      // Another account: forget what the previous one listed.
       const account = config.email ? accountHash(config.email) : null;
       if (account && this.state.account && account !== this.state.account) {
         this.state = emptyState();
       }
       this.state.account = account ?? this.state.account;
-      for (const kind of WATER_KINDS) {
-        if (this.state.water[kind] === WATER_STATUS.UNAVAILABLE) {
-          this.state.water[kind] = WATER_STATUS.UNKNOWN;
-        }
-      }
     }
     return accountChanged;
   }
@@ -286,7 +275,7 @@ export class IstaSync {
         await this.setStatus(false, 'status_not_configured');
         return { ok: false, authError: true };
       }
-      await this.readNewDays();
+      await this.readLatest();
       if (this.failure) {
         this.logger.info('The ista portal answers again');
         this.failure = null;
@@ -337,81 +326,38 @@ export class IstaSync {
     return { ok: false, error: err };
   }
 
-  firstDayToRead(kind, yesterday) {
-    const oldest = addDays(yesterday, -(BACKFILL_DAYS - 1));
-    const last = this.state.lastDay[kind];
-    if (!last || last < oldest) {
-      return oldest;
+  async readLatest() {
+    let requests = 1;
+    const page = await this.client.openIndexPage();
+    const meters = [];
+
+    if (!page.water) {
+      this.logger.debug('The index page offers no water meter');
+    } else if (!page.maxDay) {
+      this.logger.debug('The index page offers no reading date yet');
+    } else if (this.hasReadings(WATER_KINDS, page.maxDay)) {
+      this.logger.debug(`No water reading newer than ${page.maxDay} on the portal`);
+    } else {
+      await this.pause();
+      requests += 1;
+      meters.push(...(await this.client.searchIndexes(page, 'water')));
     }
-    return addDays(last, 1);
-  }
 
-  async readNewDays() {
-    const yesterday = addDays(localDay(this.now()), -1);
-    const newStates = [];
-    let pointsChanged = false;
-    let requests = 0;
-
-    for (const kind of FLUIDS) {
-      const isWater = kind !== KINDS.HEATING;
-      if (isWater && this.state.water[kind] === WATER_STATUS.UNAVAILABLE) {
-        continue;
-      }
-      for (
-        let day = this.firstDayToRead(kind, yesterday);
-        day <= yesterday;
-        day = addDays(day, 1)
-      ) {
-        if (requests > 0 && this.requestGapMs > 0) {
-          await sleep(this.requestGapMs);
-        }
+    if (page.heatingIndex) {
+      if (!this.hasReadings([KINDS.HEATING], page.maxDay)) {
+        await this.pause();
         requests += 1;
-        let points;
-        try {
-          points = await this.client.fetchDay(kind, day);
-        } catch (err) {
-          if (!isWater || err instanceof AuthError) {
-            throw err;
-          }
-          // Water never fails the run: the heating readings still go out.
-          if (this.isUnsupportedPage(err) && this.state.water[kind] !== WATER_STATUS.AVAILABLE) {
-            this.markWaterUnavailable(kind, err);
-          } else {
-            // Retried at every run: logged once, until it works again.
-            const level = this.waterFailures.has(kind) ? 'debug' : 'warn';
-            this.waterFailures.add(kind);
-            this.logger[level](`Reading the ${kind} of ${day} failed: ${err.message}`);
-          }
-          break;
-        }
-        const ofKind = points.filter((point) => point.kind === kind);
-        if (isWater && ofKind.length === 0) {
-          this.markWaterUnavailable(kind);
-          break;
-        }
-        if (isWater) {
-          this.state.water[kind] = WATER_STATUS.AVAILABLE;
-          if (this.waterFailures.delete(kind)) {
-            this.logger.info(`The ${kind} readings answer again`);
-          }
-        }
-        if (ofKind.some((point) => point.index === null)) {
-          this.logger.debug(`No ${kind} reading for ${day} on the portal yet`);
-          break;
-        }
-        pointsChanged = this.mergePoints(points) || pointsChanged;
-        const created_at = stateInstant(day);
-        const kindsInAnswer = [...new Set(points.map((point) => point.kind))];
-        for (const answerKind of kindsInAnswer) {
-          for (const state of statesOfDay(answerKind, points)) {
-            newStates.push({ ...state, created_at });
-          }
-        }
-        this.recordDaily(day, kind, points);
-        this.state.lastDay[kind] = day;
+        meters.push(...(await this.readHeating(page, meters.length > 0 || page.water)));
       }
+    } else if (page.heatingInstalled && !this.heatingNoticeLogged) {
+      this.heatingNoticeLogged = true;
+      this.logger.info(
+        'The portal lists heating for this dwelling, but its index page does not offer it: the heating features stay hidden. Please report it (see the documentation).',
+      );
     }
 
+    const newStates = this.collectStates(meters);
+    const pointsChanged = this.mergePoints(meters.filter((meter) => meter.index !== null));
     if (pointsChanged) {
       await this.publishDevice();
     }
@@ -420,21 +366,90 @@ export class IstaSync {
       this.state.recent = [...this.state.recent, ...newStates].slice(-MAX_RECENT_STATES);
     }
     this.logger.debug(
-      `Portal read: ${requests} request(s), ${newStates.length} new reading(s), latest day ${this.latestDay() ?? 'none'}`,
+      `Portal read: ${requests} request(s), ${meters.length} meter(s) (${meters.filter((m) => m.estimated).length} estimated), ${newStates.length} new reading(s), latest day ${this.latestDay() ?? 'none'}`,
     );
   }
 
-  isUnsupportedPage(err) {
-    return err instanceof PortalError || err instanceof UnexpectedAnswerError;
+  /** True when every known meter of these fluids has a reading of `day` or later. */
+  hasReadings(kinds, day) {
+    const known = kinds.filter((kind) => this.state.points.some((point) => point.kind === kind));
+    return (
+      Boolean(day) &&
+      known.length > 0 &&
+      known.every((kind) => (this.state.lastDay[kind] ?? '') >= day)
+    );
   }
 
-  markWaterUnavailable(kind, err) {
-    this.state.water[kind] = WATER_STATUS.UNAVAILABLE;
-    // Probed again at every start: debug only. The user sees it in the
-    // result of the connection test ("water meters: 0").
-    this.logger.debug(
-      `No ${kind} readings on the portal${err ? ` (${err.message})` : ''}: the ${kind} features stay hidden. If your dwelling has such a meter, please report it (see the documentation).`,
-    );
+  pause() {
+    return this.requestGapMs > 0 ? sleep(this.requestGapMs) : Promise.resolve();
+  }
+
+  /**
+   * The heating search was read in the portal's script, never seen answering:
+   * its failure does not stop the water readings (logged once), unless there
+   * is nothing else to read.
+   */
+  async readHeating(page, hasWater) {
+    try {
+      const meters = await this.client.searchIndexes(page, 'heating');
+      if (this.heatingFailure) {
+        this.logger.info('The heating readings answer again');
+        this.heatingFailure = false;
+      }
+      return meters.filter((meter) => meter.kind === KINDS.HEATING);
+    } catch (err) {
+      if (!hasWater || err instanceof AuthError) {
+        throw err;
+      }
+      const shape =
+        err instanceof UnexpectedAnswerError
+          ? ` Structure (no values): ${JSON.stringify(err.shape)}`
+          : '';
+      this.logger[this.heatingFailure ? 'debug' : 'warn'](
+        `Reading the heating indexes failed: ${err.message}.${shape} Please report it (see the documentation).`,
+      );
+      this.heatingFailure = true;
+      return [];
+    }
+  }
+
+  /**
+   * The dated states of the meters read, for the days not published yet. A
+   * meter without a readable index or date publishes nothing (never a 0).
+   */
+  collectStates(meters) {
+    const states = [];
+    const readable = meters.filter((meter) => meter.index !== null && meter.day);
+    const groups = new Map();
+    for (const meter of readable) {
+      const key = `${meter.day}|${meter.kind}`;
+      groups.set(key, [...(groups.get(key) ?? []), meter]);
+    }
+    for (const [key, group] of [...groups].sort(([a], [b]) => a.localeCompare(b))) {
+      const [day, kind] = key.split('|');
+      if ((this.state.lastDay[kind] ?? '') >= day) {
+        continue;
+      }
+      // Heating units of the day: only a one-day period is a day's units.
+      const points = group.map((meter) => ({
+        ...meter,
+        consumption:
+          kind === KINDS.HEATING && meter.from !== addDays(day, -1) ? null : meter.consumption,
+      }));
+      // A total needs every meter of the fluid: one missing from this answer
+      // keeps the total out (statesOfDay only sees the meters it is given).
+      const expected = this.state.points.filter((point) => point.kind === kind).length;
+      const complete = points.length >= expected;
+      const created_at = stateInstant(day);
+      for (const state of statesOfDay(kind, points)) {
+        if (complete || !TOTAL_KEYS.has(state.key)) {
+          states.push({ ...state, created_at });
+        }
+      }
+      this.recordDaily(day, kind, points);
+      this.state.lastDay[kind] = day;
+    }
+    return states;
   }
 
   mergePoints(points) {
@@ -466,7 +481,7 @@ export class IstaSync {
         const units = ofKind.reduce((sum, point) => sum + point.consumption, 0);
         entry[kind] = Math.round(units * 100) / 100;
       }
-    } else {
+    } else if (ofKind.every((point) => point.index !== null)) {
       entry[kind] = Math.round(ofKind.reduce((sum, point) => sum + point.index, 0) * 1000) / 1000;
     }
     this.state.daily = this.state.daily.slice(-DAILY_HISTORY_DAYS);

@@ -1,40 +1,41 @@
 # ista Web'conso (France)
 
 Amène dans Gladys les relevés qu'**ista** fait à distance dans votre immeuble :
-les **répartiteurs de frais de chauffage** de vos radiateurs et, quand le
-portail les fournit, vos **compteurs d'eau**. Les données viennent du portail
+vos **compteurs d'eau** et, quand le portail les propose, les **répartiteurs de
+frais de chauffage** de vos radiateurs. Les données viennent du portail
 résident ista [ista-webconso.fr](https://www.ista-webconso.fr) (« Mon espace
 résident »).
 
 > **Non affiliée à ista.** ista et Web'conso sont des marques de leurs
 > propriétaires. Cette intégration est un projet indépendant.
 >
-> **Développée sans compte : retours bienvenus.** Personne ne l'a encore
-> essayée sur un vrai compte Web'conso. C'est le type d'intégration le plus
-> fragile : il n'y a pas d'API publique, elle lit donc le portail comme le fait
-> votre navigateur, et peut cesser de fonctionner le jour où ista modifie son
-> site.
+> **Eau vérifiée sur un vrai compte, chauffage pas encore.** Les relevés d'eau
+> suivent des pages partagées par un résident en novembre 2026 ; ceux du
+> chauffage n'ont pas encore été vus fonctionner. C'est le type d'intégration
+> le plus fragile : il n'y a pas d'API publique, elle lit donc le portail comme
+> le fait votre navigateur, et peut cesser de fonctionner le jour où ista
+> modifie son site.
 
 ## Ce que vous obtenez
 
 Un appareil, **Logement ista**, avec :
 
-| Fonctionnalité                           | Type Gladys | Unité  | Ce que c'est                                                                                           |
-| ---------------------------------------- | ----------- | ------ | ------------------------------------------------------------------------------------------------------ |
-| Unités de chauffage du jour              | Compteur    | aucune | Les unités de tous vos radiateurs pour la journée, pondérées par le coefficient de chacun (facturées). |
-| Radiateur _pièce_ — n° _série_ (chacun)  | Compteur    | aucune | L'index affiché sur le répartiteur de ce radiateur.                                                    |
-| Eau froide / Eau chaude _pièce_ (chacun) | Volume      | m³     | L'index cumulé de ce compteur. **Non vérifié**, voir les limites.                                      |
-| Eau froide — total / Eau chaude — total  | Volume      | m³     | La somme des index, quand le logement a plusieurs compteurs de ce fluide.                              |
+| Fonctionnalité                                         | Type Gladys | Unité  | Ce que c'est                                                                                     |
+| ------------------------------------------------------ | ----------- | ------ | ------------------------------------------------------------------------------------------------ |
+| Unités de chauffage du jour                            | Compteur    | aucune | Les unités de tous vos radiateurs sur le dernier jour relevé. **Non vérifié**, voir les limites. |
+| Radiateur _pièce_ — n° _série_ (chacun)                | Compteur    | aucune | L'index affiché sur le répartiteur de ce radiateur. **Non vérifié**, voir les limites.           |
+| Eau froide / Eau chaude _pièce_ — n° _numéro_ (chacun) | Volume      | m³     | L'index cumulé de ce compteur, tel que le portail le relève (réel ou estimé).                    |
+| Eau froide — total / Eau chaude — total                | Volume      | m³     | La somme des index, quand le logement a plusieurs compteurs de ce fluide.                        |
 
 Les unités de chauffage **n'ont pas d'unité physique** : un répartiteur ne
 mesure pas d'énergie, il sert seulement à partager la facture de chauffage de
 l'immeuble entre les logements. Elles sont donc affichées comme de simples
 compteurs, sans kWh.
 
-Chaque relevé est **daté de son propre jour**, même quand le portail le publie
-avec plusieurs jours de retard : les graphiques de Gladys montrent la
-consommation le jour où elle a eu lieu, pas le jour où elle a été lue. À la
-création de l'appareil, les 7 derniers jours déjà lus lui sont envoyés.
+Chaque relevé est **daté de sa date de relevé**, qui a souvent quelques jours :
+les graphiques de Gladys montrent l'index le jour où il a été relevé, pas le
+jour où il a été lu. À la création de l'appareil, les relevés récents déjà lus
+lui sont envoyés.
 
 Un **widget de tableau de bord**, « Consommation ista », montre les unités de
 chauffage du dernier jour, les index d'eau, un histogramme des unités de
@@ -76,29 +77,33 @@ d'inactivité), et il faut alors en coller une nouvelle.
    texte dans **Cookie de session**, enregistrez, et cliquez sur **Tester la
    connexion et relever maintenant**.
 
-Comme chaque lecture rattrape les 7 derniers jours, coller un cookie neuf une
-fois par semaine suffit à garder l'historique complet.
+Les index sont cumulés : après un cookie expiré, le relevé suivant rattrape
+la consommation ; seuls les jours intermédiaires n'ont pas de point dans les
+graphiques.
 
 ## Fréquence de lecture du portail
 
 Le portail est lu toutes les **12 heures** par défaut, réglable de **3 à 24
 heures** (**Intervalle de relevé**). ista met à jour les relevés **une fois par
-jour au plus**, et beaucoup d'immeubles ne sont relevés **qu'une fois par
-semaine** : lire plus souvent n'apporte rien et ne fait que charger le
-portail. Chaque lecture ne demande que les jours pas encore lus, une petite
-requête par jour et par fluide, avec une pause entre deux.
+jour au plus**, souvent avec quelques jours de retard : lire plus souvent
+n'apporte rien et ne fait que charger le portail. Chaque lecture ouvre la page
+**index à la demande** du portail et, quand elle propose une date de relevé
+plus récente, demande les index de cette date : deux petites requêtes (trois
+avec le chauffage), une seule quand rien n'est nouveau.
 
 ## Limites
 
-- **Connexion vérifiée en partie.** Le portail envoie le navigateur vers la
-  page de connexion d'ista (`login.ista.com`). L'intégration suit les mêmes
-  étapes, et cela a été vérifié sur le vrai portail jusqu'au refus d'un compte
-  inventé (pas de captcha). Une connexion réussie avec un vrai compte n'a pas
-  encore été vue.
-- **Eau non vérifiée.** La page du chauffage est connue grâce à un projet
-  public qui la lisait en 2025. Les pages de l'eau sont une supposition :
-  quand le portail les refuse, aucune fonctionnalité d'eau n'apparaît, et le
-  test de la connexion compte 0 compteur d'eau. Si votre eau n'apparaît pas, signalez-le.
+- **Connexion vérifiée.** Le portail envoie le navigateur vers la page de
+  connexion d'ista (`login.ista.com`) ; l'intégration suit les mêmes étapes.
+  Un résident s'est connecté avec en novembre 2026, par mot de passe et par
+  cookie.
+- **Chauffage non vérifié.** Les relevés de chauffage passent par l'onglet
+  chauffage de la même page, connu seulement par le script du portail :
+  personne ne l'a encore vu répondre. Si le chauffage est indiqué pour votre
+  logement mais n'apparaît pas, les journaux le disent : merci de le signaler.
+- **Index estimés.** Le portail marque certains index comme estimés (un
+  compteur qui n'a pas répondu au relevé radio) : ils sont publiés tels que le
+  portail les montre, et le relevé réel suivant prend le relais.
 - **Un logement par compte.** Un compte qui a plusieurs logements montre leurs
   compteurs dans un seul appareil.
 - **Remise à zéro des index.** Les répartiteurs repartent en général de zéro au
