@@ -213,6 +213,21 @@ test('an unknown login page is reported as a portal change', async () => {
   await assert.rejects(ista.login(), (err) => err.code === AUTH_ERRORS.LOGIN_FORM_NOT_FOUND);
 });
 
+test('a sign-in that does not hold says where the portal sent us, never what it holds', async () => {
+  const portal = createFakePortal({ menuToHome: true });
+  const ista = client(portal);
+  await assert.rejects(ista.openIndexPage(), (err) => {
+    assert.equal(err.code, AUTH_ERRORS.SESSION_EXPIRED);
+    assert.match(
+      err.message,
+      /public page at ista-webconso\.fr\/espace-client-v2\/public\/home\.do/,
+    );
+    assert.ok(!err.message.includes('?'), 'no query string');
+    return true;
+  });
+  assert.equal(portal.logins, 1);
+});
+
 test('the cookie mode sends the pasted cookie and never tries to sign in', async () => {
   const portal = createFakePortal();
   portal.sessions.add('pasted-session');
