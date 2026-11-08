@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [1.1.2] - 2026-11-08
+
 ### Fixed
 
 - **Test the connection and read now** showed a failure (expired cookie, refused password…) in
@@ -70,7 +72,8 @@ the notes of the version's GitHub Release.
   dashboard widget.
 - Every text in English, French, German and Spanish.
 
-[Unreleased]: https://github.com/guim31/gladys-ista/compare/v1.1.1...HEAD
+[Unreleased]: https://github.com/guim31/gladys-ista/compare/v1.1.2...HEAD
+[1.1.2]: https://github.com/guim31/gladys-ista/compare/v1.1.1...v1.1.2
 [1.1.1]: https://github.com/guim31/gladys-ista/compare/v1.1.0...v1.1.1
 [1.1.0]: https://github.com/guim31/gladys-ista/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/guim31/gladys-ista/compare/v1.0.1...v1.0.2
