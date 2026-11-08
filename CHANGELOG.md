@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-11-08
+
 ### Fixed
 
 - No reading came in ("Unknown format" status): the consumption page the
@@ -56,6 +58,7 @@ the notes of the version's GitHub Release.
   dashboard widget.
 - Every text in English, French, German and Spanish.
 
-[Unreleased]: https://github.com/guim31/gladys-ista/compare/v1.0.2...HEAD
+[Unreleased]: https://github.com/guim31/gladys-ista/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/guim31/gladys-ista/compare/v1.0.2...v1.1.0
 [1.0.2]: https://github.com/guim31/gladys-ista/compare/v1.0.1...v1.0.2
 [1.0.1]: https://github.com/guim31/gladys-ista/releases/tag/v1.0.1
