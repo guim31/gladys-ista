@@ -250,7 +250,9 @@ test('a restart shows the device again without asking the portal', async (t) => 
 test('a refused password is shown in the Configuration screen, in every language', async (t) => {
   const { gladys } = await setup(t, { config: { ...ACCOUNT, password: 'wrong' } });
   const ack = await gladys.fake.action('test_connection', {});
-  assert.equal(ack.data.message.fr, 'Le portail a refusé l’e-mail ou le mot de passe.');
+  // A failure is an error (shown in red), still in every language.
+  assert.equal(ack.success, false);
+  assert.equal(ack.error.fr, 'Le portail a refusé l’e-mail ou le mot de passe.');
   const status = gladys.fake.connectionStatus;
   assert.equal(status.connected, false);
   assert.deepEqual(Object.keys(status.message), ['en', 'fr', 'de', 'es']);
@@ -259,7 +261,8 @@ test('a refused password is shown in the Configuration screen, in every language
 test('without credentials, nothing is asked to the portal', async (t) => {
   const { gladys, portal } = await setup(t, { config: {} });
   const ack = await gladys.fake.action('test_connection', {});
-  assert.match(ack.data.message.en, /Enter your Web’conso e-mail/);
+  assert.equal(ack.success, false);
+  assert.match(ack.error.en, /Enter your Web’conso e-mail/);
   assert.equal(portal.requests.length, 0);
 });
 
