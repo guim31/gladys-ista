@@ -332,16 +332,23 @@ export class IstaClient {
 
   /** True when a portal answer is the sign-in, not the page asked for. */
   isSignedOut(result) {
+    return this.signedOutReason(result) !== null;
+  }
+
+  /**
+   * Why a portal answer looks signed out (`null` when it does not): told in
+   * the error, so that a resident's log says where the portal sent us.
+   */
+  signedOutReason(result) {
     const url = new URL(result.url);
     // Without a valid session the portal answers with its login form, or with
     // its public home page (sign-in link, no form).
-    return (
-      url.hostname.replace(/^www\./, '') !== PORTAL_DOMAIN ||
-      result.status === 401 ||
-      url.pathname.includes('/public/') ||
-      findLoginForm(result.body, result.url) !== null ||
-      findAuthenticateLink(result.body, result.url) !== null
-    );
+    if (url.hostname.replace(/^www\./, '') !== PORTAL_DOMAIN) return 'another site';
+    if (result.status === 401) return 'HTTP 401';
+    if (url.pathname.includes('/public/')) return 'public page';
+    if (findLoginForm(result.body, result.url) !== null) return 'login form';
+    if (findAuthenticateLink(result.body, result.url) !== null) return 'sign-in link';
+    return null;
   }
 
   /**
@@ -356,10 +363,11 @@ export class IstaClient {
       await this.login();
       [url, options] = await retry();
       result = await this.request(url, options);
-      if (this.isSignedOut(result)) {
+      const reason = this.signedOutReason(result);
+      if (reason) {
         throw new AuthError(
           AUTH_ERRORS.SESSION_EXPIRED,
-          'the portal still asks to sign in after a successful login',
+          `the portal still asks to sign in after a successful login (${reason} at ${safeUrl(result.url)}, HTTP ${result.status})`,
         );
       }
     }

@@ -10,6 +10,11 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Changed
+
+- When the portal still asks to sign in right after a successful sign-in, the log now says on which
+  page it sent the integration and why it looks signed out (page address without its parameters).
+
 ## [1.1.2] - 2026-11-08
 
 ### Fixed

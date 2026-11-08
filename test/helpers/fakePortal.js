@@ -199,7 +199,7 @@ export function createFakePortal(options = {}) {
       ]);
     }
     if (url.origin === PORTAL && url.pathname === '/espace-client-v2/menu.do') {
-      if (!signedIn) {
+      if (!signedIn || options.menuToHome) {
         return toHome();
       }
       if (url.searchParams.get('id') === 'lgtOcc_index') {
