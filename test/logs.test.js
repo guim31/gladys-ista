@@ -28,7 +28,9 @@ function captureLogs(t, level) {
   return lines;
 }
 
-const SECRETS = [ACCOUNT.email, ACCOUNT.password, 'session-1', 'session-2'];
+const SECRETS = [ACCOUNT.email, ACCOUNT.password, 'session-1', 'session-2', 'csrf-'];
+// What the portal shows of the dwelling: never in a log line, even at debug.
+const READINGS = ['900000101', '900000202', '123.456', '45.678', 'CUISINE', 'VILLE-FICTIVE'];
 
 test('a normal reading writes nothing at the default level', async (t) => {
   const portal = createFakePortal();
@@ -58,9 +60,21 @@ test('the debug lines of a reading carry no secret of the configuration', async 
     lines.some((line) => line.includes('[DEBUG]')),
     'debug lines are written',
   );
-  for (const secret of SECRETS) {
+  for (const secret of [...SECRETS, ...READINGS]) {
     assert.ok(!lines.join('\n').includes(secret), `the logs contain "${secret}"`);
   }
+});
+
+test('heating listed but not offered by the index page: one info line, no failure', async (t) => {
+  const portal = createFakePortal({ index: { heating: true, heatingIndex: false } });
+  const { sync } = await setup(t, { portal });
+  const lines = captureLogs(t, 'info');
+  assert.equal((await sync.refresh()).ok, true);
+  assert.equal((await sync.refresh()).ok, true);
+  // The first sign-in, and the notice once.
+  assert.equal(lines.length, 2);
+  assert.match(lines[0], /\[INFO\].*Signed in/);
+  assert.match(lines[1], /\[INFO\].*does not offer it/);
 });
 
 test('a repeated failure logs one line when it starts and one when it ends', async (t) => {

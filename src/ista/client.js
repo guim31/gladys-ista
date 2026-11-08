@@ -7,8 +7,10 @@
 //      redirects, fills the same login form, and comes back to the portal with
 //      its session cookie (JSESSIONID). Or, when that does not work, it uses a
 //      session cookie the user copied from their own browser.
-//   2. Readings. The portal's consumption page answers JSON for one day at a
-//      time (see parse.js).
+//   2. Readings. The "index à la demande" page (index on demand) holds a form;
+//      posting it back with a reading date answers the same page with one
+//      block per meter (see parse.js). The page's own hidden fields (CSRF
+//      token included) are sent back as the browser would.
 // When the session expires, the client signs in again once and retries.
 //
 // Nothing here logs a URL query string, a cookie, an e-mail or a password: the
@@ -17,7 +19,18 @@
 
 import { createLogger } from '@gladysassistant/integration-sdk';
 import { CookieJar, cookiesFromPastedText } from './cookies.js';
-import { KINDS, UnexpectedAnswerError, describeShape, parseConsumptionAnswer } from './parse.js';
+import {
+  KINDS,
+  UnexpectedAnswerError,
+  addDays,
+  attribute,
+  dayToFrench,
+  describeIndexForm,
+  fieldValue,
+  looseDay,
+  parseIndexForm,
+  parseMeters,
+} from './parse.js';
 
 export const PORTAL_DOMAIN = 'ista-webconso.fr';
 export const PORTAL_ORIGIN = `https://${PORTAL_DOMAIN}`;
@@ -28,17 +41,22 @@ export const ENTRY_URL = `${PORTAL_ORIGIN}/espace-client-v2/public/home.do?dispa
 // Hops through pages that only link to the login (the public home page)
 // before giving up on finding the form.
 const MAX_LOGIN_LINK_HOPS = 2;
-export const CONSUMPTION_URL = `${PORTAL_ORIGIN}/espace-client-v2/occupant/ficheLogement.do`;
+export const INDEX_URL = `${PORTAL_ORIGIN}/espace-client-v2/occupant/ficheIndexDemande.do`;
 
-// The `dispatch` parameter of the consumption page, per fluid. Heating is the
-// one a public project used against the live portal in 2025. The two water
-// ones are UNVERIFIED guesses on the same naming pattern: when the portal
-// refuses them, the integration simply publishes no water feature (see
-// readings.js) until someone with an account tells us the real names.
+// The `dispatch` values of the index form (ficheIndexDemandeOccupant.js on the
+// portal). Water: seen on a live account (2026-11-08). Heating (heat cost
+// allocators): read in the page script only, never seen answering.
 export const DISPATCHES = {
-  [KINDS.HEATING]: 'calculeConsommationChauffageRfcPourLogement',
-  [KINDS.COLD_WATER]: 'calculeConsommationEauFroidePourLogement',
-  [KINDS.HOT_WATER]: 'calculeConsommationEauChaudePourLogement',
+  WATER: 'voirIndexDemande',
+  HEATING: 'voirIndexDemandeChauffageRfc',
+};
+// The ids of the heating tab's date inputs and of its range of readings
+// (page script): their `name` is what the form sends.
+const HEATING_INPUT_IDS = {
+  day: 'choixDateIndexDemandeChauffageRfc',
+  from: 'choixDateDebutPeriodeIndexChauffageRfc',
+  lastDay: 'finPeriodeAvecDonneesChauffageRfc',
+  firstDay: 'debutPeriodeAvecDonneesChauffageRfc',
 };
 
 const MAX_REDIRECTS = 10;
@@ -80,20 +98,6 @@ export function safeUrl(url) {
   } catch {
     return '(invalid URL)';
   }
-}
-
-function decodeHtml(value) {
-  return value
-    .replace(/&amp;/g, '&')
-    .replace(/&#x2F;/gi, '/')
-    .replace(/&#47;/g, '/')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'");
-}
-
-function attribute(tag, name) {
-  const match = tag.match(new RegExp(`\\s${name}\\s*=\\s*("([^"]*)"|'([^']*)')`, 'i'));
-  return match ? decodeHtml(match[2] ?? match[3] ?? '') : undefined;
 }
 
 const CAPTCHA_MARKERS = /g-recaptcha|grecaptcha|h-captcha|hcaptcha|frc-captcha|cf-turnstile/i;
@@ -162,13 +166,6 @@ export function findAuthenticateLink(html, pageUrl) {
     }
   }
   return null;
-}
-
-/** Calendar day after `day` (`YYYY-MM-DD`, no time zone involved). */
-export function nextDay(day) {
-  const date = new Date(`${day}T00:00:00Z`);
-  date.setUTCDate(date.getUTCDate() + 1);
-  return date.toISOString().slice(0, 10);
 }
 
 export class IstaClient {
@@ -329,58 +326,144 @@ export class IstaClient {
     this.signedIn = true;
   }
 
+  /** True when a portal answer is the sign-in, not the page asked for. */
+  isSignedOut(result) {
+    const url = new URL(result.url);
+    // Without a valid session the portal answers with its login form, or with
+    // its public home page (sign-in link, no form).
+    return (
+      url.hostname.replace(/^www\./, '') !== PORTAL_DOMAIN ||
+      result.status === 401 ||
+      url.pathname.includes('/public/') ||
+      findLoginForm(result.body, result.url) !== null ||
+      findAuthenticateLink(result.body, result.url) !== null
+    );
+  }
+
   /**
-   * Readings of one fluid for one day.
-   * @param {string} kind one of KINDS
-   * @param {string} day `YYYY-MM-DD`
+   * One request to a page of the signed-in space. A lost session is renewed
+   * once (sign-in, then `retry()` builds the request again: a new form, a new
+   * CSRF token). Returns the answer page.
    */
-  async fetchDay(kind, day) {
-    const url = new URL(CONSUMPTION_URL);
-    url.searchParams.set('dispatch', DISPATCHES[kind]);
-    url.searchParams.set('start', day);
-    url.searchParams.set('end', nextDay(day));
-    let answer = await this.requestJson(url.toString());
-    if (answer.sessionExpired) {
+  async signedInRequest(build, retry = build) {
+    let [url, options] = await build();
+    let result = await this.request(url, options);
+    if (this.isSignedOut(result)) {
       await this.login();
-      answer = await this.requestJson(url.toString());
-      if (answer.sessionExpired) {
+      [url, options] = await retry();
+      result = await this.request(url, options);
+      if (this.isSignedOut(result)) {
         throw new AuthError(
           AUTH_ERRORS.SESSION_EXPIRED,
           'the portal still asks to sign in after a successful login',
         );
       }
     }
-    return parseConsumptionAnswer(answer.json, kind);
-  }
-
-  async requestJson(url) {
-    const result = await this.request(url, { accept: 'application/json, text/javascript, */*' });
-    const onPortal = new URL(result.url).hostname.replace(/^www\./, '') === PORTAL_DOMAIN;
-    // Without a valid session the portal answers with its login form, or with
-    // its public home page (sign-in link, no form).
-    const signedOut =
-      !onPortal ||
-      result.status === 401 ||
-      findLoginForm(result.body, result.url) !== null ||
-      findAuthenticateLink(result.body, result.url) !== null ||
-      new URL(result.url).pathname.includes('/public/');
-    if (signedOut) {
-      return { sessionExpired: true };
-    }
     if (result.status >= 400) {
       throw new PortalError(`HTTP ${result.status} from ${safeUrl(result.url)}`, result.status);
     }
-    try {
-      const json = JSON.parse(result.body);
-      this.saveSession();
-      return { json };
-    } catch {
-      // An HTML page where JSON was expected: an unknown page, or the session
-      // landing page of a portal that changed. Never log the body itself.
+    this.saveSession();
+    return result;
+  }
+
+  /**
+   * Open the index page: its form and what it offers (src/ista/parse.js
+   * `describeIndexForm`).
+   */
+  async openIndexPage() {
+    const result = await this.signedInRequest(() => [INDEX_URL, {}]);
+    return this.indexPageOf(result);
+  }
+
+  indexPageOf(result) {
+    const form = parseIndexForm(result.body, result.url);
+    if (!form) {
+      // An unknown page: say what it is, never what it holds.
       throw new UnexpectedAnswerError(
-        `no JSON from ${safeUrl(result.url)} (HTTP ${result.status}, ${result.contentType || 'no content type'})`,
-        describeShape(null),
+        `no index form at ${safeUrl(result.url)} (HTTP ${result.status}, ${result.contentType || 'no content type'})`,
+        {
+          forms: (result.body.match(/<form\b[^>]*>/gi) ?? []).map(
+            (tag) => attribute(tag, 'name') ?? '',
+          ),
+        },
       );
     }
+    return {
+      form,
+      ...describeIndexForm(form),
+      // The heating tab has its own range of readings, when it has a tab.
+      heatingMaxDay: looseDay(form.byId[HEATING_INPUT_IDS.lastDay]?.value),
+    };
   }
+
+  /**
+   * Search the indexes of one fluid family at the most recent date the page
+   * allows, over a one-day period.
+   * @param {object} page what openIndexPage() returned
+   * @param {'water'|'heating'} family
+   * @returns {Promise<{ meters: Array, page: object }>} the meters
+   *   (parse.js `parseMeters`), and the answer page: its form carries the
+   *   CSRF token of the next search (the portal renews it on every page).
+   */
+  async searchIndexes(page, family) {
+    const kind = family === 'heating' ? KINDS.HEATING : KINDS.COLD_WATER;
+    const post = (current) => [
+      current.form.action,
+      { method: 'POST', form: this.searchFields(current, family) },
+    ];
+    const result = await this.signedInRequest(
+      () => post(page),
+      async () => post(await this.openIndexPage()),
+    );
+    if (!parseIndexForm(result.body, result.url)) {
+      throw new UnexpectedAnswerError(
+        `the index search answered another page (${safeUrl(result.url)}, HTTP ${result.status})`,
+        {},
+      );
+    }
+    return { meters: parseMeters(result.body, kind), page: this.indexPageOf(result) };
+  }
+
+  /** The form a browser sends for the search: every field, a few set. */
+  searchFields(page, family) {
+    // A browser sends the line breaks of a value (the postal address) as CRLF.
+    const fields = new URLSearchParams(
+      page.form.fields.map(([name, value]) => [name, value.replace(/\r?\n/g, '\r\n')]),
+    );
+    const set = (name, value) => fields.set(name, value);
+    if (family === 'heating') {
+      const ids = page.form.byId;
+      const dayName = ids[HEATING_INPUT_IDS.day]?.name;
+      const fromName = ids[HEATING_INPUT_IDS.from]?.name;
+      if (!dayName || !fromName) {
+        throw new UnexpectedAnswerError('the heating index form has no date fields', {
+          inputs: Object.keys(ids),
+        });
+      }
+      const day = page.heatingMaxDay ?? page.maxDay;
+      const first = looseDay(ids[HEATING_INPUT_IDS.firstDay]?.value) ?? page.minDay;
+      if (!day) {
+        throw new UnexpectedAnswerError('the heating index form has no date range', {});
+      }
+      set('dispatch', DISPATCHES.HEATING);
+      set(dayName, dayToFrench(day));
+      set(fromName, dayToFrench(periodStart(day, first)));
+      return fields;
+    }
+    if (!page.maxDay) {
+      throw new UnexpectedAnswerError('the index form has no date range', {});
+    }
+    set('dispatch', DISPATCHES.WATER);
+    set('choixOnglet', fieldValue(page.form, 'choixOnglet') || 'EAU');
+    set('indexChoisi', 'true');
+    set('dateIndexDemande', dayToFrench(page.maxDay));
+    set('dateDebutPeriodeIndex', dayToFrench(periodStart(page.maxDay, page.minDay)));
+    return fields;
+  }
+}
+
+/** The day before `day`, but never before the first day the portal allows. */
+export function periodStart(day, firstDay) {
+  const before = addDays(day, -1);
+  return firstDay && before < firstDay ? (firstDay < day ? firstDay : day) : before;
 }

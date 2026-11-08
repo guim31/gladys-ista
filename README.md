@@ -2,16 +2,18 @@
 
 A [Gladys Assistant](https://gladysassistant.com) external integration that
 reads, from the ista resident portal [ista-webconso.fr](https://www.ista-webconso.fr),
-the **heat cost allocators** (one per radiator) and the **water meters** ista
+the **water meters** and the **heat cost allocators** (one per radiator) ista
 reads remotely in French apartment buildings.
 
 > **Not affiliated with ista.** ista and Web'conso are trademarks of their
 > owners; this is an independent, unofficial project.
 >
-> **Developed without an account: feedback welcome.** The portal has no public
-> API. The integration signs in and reads the portal the way a browser does,
-> and nobody has run it against a real account yet. Expect it to be fragile,
-> and to break when ista changes the website. Please report what you see.
+> **Water checked on a real account, heating not yet.** The portal has no
+> public API: the integration signs in and reads the portal the way a browser
+> does. Sign-in and the water pages were checked with a resident's account in
+> November 2026; the heating page has not been seen answering. Expect it to be
+> fragile, and to break when ista changes the website. Please report what you
+> see.
 
 User documentation: [English](docs/en.md) · [Français](docs/fr.md) (Gladys
 shows it from the integration's Configuration screen).
@@ -22,18 +24,18 @@ shows it from the integration's Configuration screen).
   - per radiator, the index of its allocator: `counter-sensor`/`integer`,
     **no unit**. Allocator units have no physical dimension (they only share
     the heating bill out), so no kWh is claimed;
-  - the **heating units of the day**, weighted by each radiator's coefficient
-    (what the bill uses): `counter-sensor`/`integer`;
+  - the **heating units of the day**, the sum of the radiators' units over a
+    one-day period: `counter-sensor`/`integer` (unverified);
   - per water meter, its cumulative index: `volume-sensor`/`decimal`, `m³`,
     and a total per fluid when there are several meters.
-- Every reading is published **dated with its day** (`created_at`), so the
-  Gladys charts show the consumption on the right day even when the portal
+- Every reading is published **dated with its reading date** (`created_at`),
+  so the Gladys charts show the index on the right day even when the portal
   publishes it days late. The core deduplicates a state re-sent for the same
   instant.
 - A container timer reads the portal every **12 h** (3 to 24 h): devices are
-  published with `should_poll: false`. Each run asks only for the days not
-  read yet (7 days back at most), one request per day and per fluid, with a
-  pause between requests.
+  published with `should_poll: false`. Each run opens the index page and, when
+  it offers a newer reading date, searches the indexes of that date: two
+  requests (three with heating), one when nothing is new.
 - A dashboard **widget**: heating units of the latest day, water indexes, a
   bar chart of the heating units per day, latest reading and portal status.
 - A **Test the connection and read now** action.
@@ -55,20 +57,28 @@ shows it from the integration's Configuration screen).
    when the portal sends the client back to the login page.
 2. **Fallback: a pasted session cookie.** When the sign-in fails (captcha,
    second factor, a form the client does not recognize), the user can paste
-   the `Cookie` header of their own browser. It expires; since each run
-   catches up on 7 days, a fresh cookie once a week keeps the history
-   complete. The documentation has the steps.
-3. **Readings.** `GET /espace-client-v2/occupant/ficheLogement.do?dispatch=…&start=YYYY-MM-DD&end=YYYY-MM-DD`
-   answers JSON: `response[].pointsComptage[]`, each with `metadata`
-   (counting point number, allocator serial, room) and `consommation` (raw and
-   coefficient-weighted units, `indexDernierJourPeriode`, `is_null` for a day
-   not filled in yet).
-   - Heating: `dispatch=calculeConsommationChauffageRfcPourLogement`, seen in
-     use against the live portal in 2025.
-   - Water: `calculeConsommationEauFroidePourLogement` and
-     `calculeConsommationEauChaudePourLogement` are **unverified guesses** on
-     the same pattern. A refused page hides the water features, probed once
-     per start, never once per day.
+   the `Cookie` header of their own browser. It expires; the indexes being cumulative, the next
+   reading after a fresh cookie catches up on the consumption. The documentation has the steps.
+3. **Readings: the "index à la demande" page** (checked on a live account,
+   2026-11-08). `GET /espace-client-v2/occupant/ficheIndexDemande.do` renders
+   one form, `ficheIndexDemandeOccupantForm`, whose hidden fields say what the
+   dwelling has (`logement.eauDisponible`, `indexDemandeEauDisponible`,
+   `logement.chauffageDisponible`, `indexDemandeChauffageRfcDisponible`), the
+   range of reading dates (`dateMinIndex` / `dateMaxIndex`, `YYYYMMDD`) and a
+   `_csrf` token. The search posts that same form back, every field as the
+   browser sends it, with `dispatch=voirIndexDemande`, `dateIndexDemande` (the
+   reading date, `DD/MM/YYYY`, here `dateMaxIndex`) and `dateDebutPeriodeIndex`
+   (the day before). The answer is the same page with one `div.le-compteur`
+   per meter: "EAU FROIDE" / "EAU CHAUDE", the period, then `key` / `value`
+   lines (meter number, location, index read, real or estimated,
+   consumption).
+   - Heating: `dispatch=voirIndexDemandeChauffageRfc` with the heating tab's
+     own date fields, used only when the page offers it. Read in the page
+     script (`ficheIndexDemandeOccupant.js`), **never seen answering**: its
+     failure is logged once and does not stop the water readings.
+   - The JSON consumption page used by 1.0.x
+     (`ficheLogement.do?dispatch=calculeConsommation…`) answers HTML on the
+     current portal; it is gone.
 
 Nothing is logged that could identify the user or open their account: no
 e-mail, password, cookie, nor the query of a login redirect (it carries
@@ -98,10 +108,10 @@ checks it.
 ```
 index.js                          SDK wiring only
 src/app.js                        handlers (scan, action, widget, config, lifecycle)
-src/sync.js                       timer, days to read, dated states, connection status
-src/ista/client.js                portal client: sign-in, session, consumption pages
+src/sync.js                       timer, latest reading date, dated states, connection status
+src/ista/client.js                portal client: sign-in, session, index page search
 src/ista/cookies.js               cookie jar, pasted cookie parsing
-src/ista/parse.js                 JSON answers -> counting points
+src/ista/parse.js                 index page form and meter blocks -> meters
 src/devices/dwelling.js           the Gladys device and its features
 src/widgets.js                    dashboard widget
 src/i18n.js                       every text sent to Gladys, in en/fr/de/es

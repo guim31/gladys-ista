@@ -8,11 +8,11 @@ import {
   PortalError,
   findAuthenticateLink,
   findLoginForm,
-  nextDay,
+  periodStart,
   safeUrl,
 } from '../src/ista/client.js';
 import { CookieJar, cookiesFromPastedText } from '../src/ista/cookies.js';
-import { KINDS } from '../src/ista/parse.js';
+import { KINDS, UnexpectedAnswerError } from '../src/ista/parse.js';
 import { normalizeConfig } from '../src/config.js';
 import { ACCOUNT, createFakePortal, fixture } from './helpers/fakePortal.js';
 
@@ -27,6 +27,15 @@ function memorySessionStore() {
   return store;
 }
 
+const indexRequests = (portal) =>
+  portal.requests.filter((r) => r.url.includes('ficheIndexDemande.do'));
+
+/** Open the index page and search the water indexes, as a run does. */
+async function readWater(ista) {
+  const page = await ista.openIndexPage();
+  return (await ista.searchIndexes(page, 'water')).meters;
+}
+
 function client(portal, config = {}, sessionStore = memorySessionStore()) {
   return new IstaClient({
     config: normalizeConfig({ ...ACCOUNT, ...config }),
@@ -36,19 +45,36 @@ function client(portal, config = {}, sessionStore = memorySessionStore()) {
   });
 }
 
-test('signs in through the identity server and reads a day of heating', async () => {
+test('signs in, opens the index page and searches the latest water indexes', async () => {
   const portal = createFakePortal();
   const sessionStore = memorySessionStore();
   const ista = client(portal, {}, sessionStore);
-  const points = await ista.fetchDay(KINDS.HEATING, '2026-10-10');
-  assert.equal(points.length, 3);
+  const meters = await readWater(ista);
+  assert.deepEqual(
+    meters.map((m) => [m.kind, m.index, m.day]),
+    [
+      [KINDS.COLD_WATER, 123.456, '2026-10-10'],
+      [KINDS.HOT_WATER, 45.678, '2026-10-10'],
+    ],
+  );
   assert.equal(portal.logins, 1);
-  // The first read had no session: it was sent to the login, signed in, retried.
-  const reads = portal.requests.filter((r) => r.url.includes('ficheLogement.do'));
-  assert.equal(reads.length, 2);
-  assert.match(reads[1].url, /dispatch=calculeConsommationChauffageRfcPourLogement/);
-  assert.match(reads[1].url, /start=2026-10-10&end=2026-10-11/);
-  assert.match(reads[1].cookie, /JSESSIONID=session-1/);
+  // The first GET had no session: it was sent to the login, signed in, retried.
+  assert.deepEqual(
+    indexRequests(portal).map((r) => r.method),
+    ['GET', 'GET', 'POST'],
+  );
+  // The search is the page's own form, with the browser's fields set.
+  const [search] = portal.searches;
+  assert.equal(search.get('_csrf'), 'csrf-1');
+  assert.equal(search.get('dispatch'), 'voirIndexDemande');
+  assert.equal(search.get('choixOnglet'), 'EAU');
+  assert.equal(search.get('indexChoisi'), 'true');
+  assert.equal(search.get('dateIndexDemande'), '10/10/2026');
+  assert.equal(search.get('dateDebutPeriodeIndex'), '09/10/2026');
+  assert.equal(search.get('dateMaxIndex'), '20261010');
+  // Line breaks sent as CRLF, entities decoded, as a browser does.
+  assert.match(search.get('uex.adressePostale'), /RUE DE L'EXEMPLE\r\n\s+00000 VILLE-FICTIVE/);
+  assert.match(indexRequests(portal)[2].cookie, /JSESSIONID=session-1/);
   // The session survives a restart.
   assert.ok(sessionStore.saved.some((c) => c.name === 'JSESSIONID'));
 });
@@ -56,19 +82,62 @@ test('signs in through the identity server and reads a day of heating', async ()
 test('reuses the saved session instead of signing in again', async () => {
   const portal = createFakePortal();
   const sessionStore = memorySessionStore();
-  await client(portal, {}, sessionStore).fetchDay(KINDS.HEATING, '2026-10-10');
-  const restarted = client(portal, {}, sessionStore);
-  await restarted.fetchDay(KINDS.HEATING, '2026-10-11');
+  await readWater(client(portal, {}, sessionStore));
+  await readWater(client(portal, {}, sessionStore));
   assert.equal(portal.logins, 1);
 });
 
-test('signs in again once when the session expired', async () => {
+test('a session lost between the page and the search: one sign-in, a fresh form', async () => {
   const portal = createFakePortal();
   const ista = client(portal);
-  await ista.fetchDay(KINDS.HEATING, '2026-10-10');
+  await readWater(ista);
+  const page = await ista.openIndexPage();
   portal.expireSessions();
-  await ista.fetchDay(KINDS.HEATING, '2026-10-11');
+  const { meters } = await ista.searchIndexes(page, 'water');
+  assert.equal(meters.length, 2);
   assert.equal(portal.logins, 2);
+  // The search after the sign-in carries the token of the page opened again.
+  const tokens = portal.searches.map((form) => form.get('_csrf'));
+  assert.equal(tokens.at(-1), 'csrf-4');
+});
+
+test('the heating search uses the heating tab fields (hypothetical page)', async () => {
+  const portal = createFakePortal({
+    index: { heating: true, heatingIndex: true, heatingMax: '2026/10/08' },
+  });
+  const ista = client(portal);
+  const page = await ista.openIndexPage();
+  assert.equal(page.heatingIndex, true);
+  const { meters } = await ista.searchIndexes(page, 'heating');
+  assert.deepEqual(
+    meters.map((m) => [m.id, m.kind, m.index, m.day]),
+    [
+      ['800000301', KINDS.HEATING, 1520, '2026-10-08'],
+      ['800000302', KINDS.HEATING, 640, '2026-10-08'],
+    ],
+  );
+  const [search] = portal.searches;
+  assert.equal(search.get('dispatch'), 'voirIndexDemandeChauffageRfc');
+  // The tab is only shown by the page script: the field is sent as it is.
+  assert.equal(search.get('choixOnglet'), 'EAU');
+  assert.equal(search.get('dateIndexDemandeChauffageRfc'), '08/10/2026');
+  assert.equal(search.get('dateDebutPeriodeIndexChauffageRfc'), '07/10/2026');
+});
+
+test('a page without the index form is a portal change, described without values', async () => {
+  const portal = createFakePortal();
+  const fetch = async (url, init) =>
+    url.includes('ficheIndexDemande.do') && portal.sessions.size > 0
+      ? new Response('<html><form name="autre"><input name="x" value="secret"></form></html>')
+      : portal.fetch(url, init);
+  const ista = new IstaClient({ config: normalizeConfig(ACCOUNT), fetch, logger });
+  await assert.rejects(
+    ista.openIndexPage(),
+    (err) =>
+      err instanceof UnexpectedAnswerError &&
+      JSON.stringify(err.shape) === '{"forms":["autre"]}' &&
+      !err.message.includes('secret'),
+  );
 });
 
 test('the public home page is followed to Keycloak, and a fake account is refused', async () => {
@@ -103,7 +172,7 @@ test('a page with neither form nor sign-in link is a portal change', async () =>
 test('a refused password is reported as such', async () => {
   const portal = createFakePortal();
   await assert.rejects(
-    client(portal, { password: 'wrong' }).fetchDay(KINDS.HEATING, '2026-10-10'),
+    readWater(client(portal, { password: 'wrong' })),
     (err) => err instanceof AuthError && err.code === AUTH_ERRORS.INVALID_CREDENTIALS,
   );
 });
@@ -147,20 +216,22 @@ test('the cookie mode sends the pasted cookie and never tries to sign in', async
     password: '',
     session_cookie: 'JSESSIONID=pasted-session; SRV=web01',
   });
-  const points = await ista.fetchDay(KINDS.HEATING, '2026-10-10');
-  assert.equal(points.length, 3);
+  const meters = await readWater(ista);
+  assert.equal(meters.length, 2);
   portal.expireSessions();
-  await assert.rejects(
-    ista.fetchDay(KINDS.HEATING, '2026-10-11'),
-    (err) => err.code === AUTH_ERRORS.SESSION_EXPIRED,
-  );
+  await assert.rejects(ista.openIndexPage(), (err) => err.code === AUTH_ERRORS.SESSION_EXPIRED);
   assert.equal(portal.logins, 0);
-  assert.ok(!portal.requests.some((r) => r.method === 'POST'));
+  // Only the searches: never a sign-in form.
+  assert.ok(
+    portal.requests.every((r) => r.method === 'GET' || r.url.includes('ficheIndexDemande.do')),
+  );
 });
 
-test('a page the portal does not know is a PortalError', async () => {
-  const portal = createFakePortal();
-  await assert.rejects(client(portal).fetchDay(KINDS.COLD_WATER, '2026-10-10'), PortalError);
+test('a refused search (expired CSRF token, server error) is a PortalError', async () => {
+  const portal = createFakePortal({
+    answer: () => new Response('<html>Erreur</html>', { status: 500 }),
+  });
+  await assert.rejects(readWater(client(portal)), PortalError);
 });
 
 test('findLoginForm reads the Keycloak form', () => {
@@ -243,7 +314,10 @@ test('a pasted cookie may be a bare value or a Cookie header', () => {
 });
 
 test('helpers', () => {
-  assert.equal(nextDay('2026-12-31'), '2027-01-01');
+  // A one-day period, never before the first day the portal allows.
+  assert.equal(periodStart('2026-03-07', '2026-02-01'), '2026-03-06');
+  assert.equal(periodStart('2026-02-01', '2026-02-01'), '2026-02-01');
+  assert.equal(periodStart('2026-01-01', null), '2025-12-31');
   assert.equal(
     safeUrl('https://ista-webconso.fr/espace-client-v2/callback?code=ONE-TIME-CODE'),
     'ista-webconso.fr/espace-client-v2/callback',

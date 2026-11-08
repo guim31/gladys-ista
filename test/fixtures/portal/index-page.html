@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="fr-FR">
+  <head>
+    <meta charset="utf-8" />
+    <title>ista Web'conso</title>
+    <script type="text/javascript" src="/espace-client-v2/js/occupant/ficheIndexDemandeOccupant.js?v=3.2.37"></script>
+  </head>
+  <body>
+    <!-- Reconstructed and anonymized: structure of the live page (2026-11-08), every value invented. -->
+    <a href="/espace-client-v2/occupant/tableauBordLogement.do?dispatch=init" class="logo"></a>
+    <a href="/espace-client-v2/public/login.do?dispatch=logout" class="infos">Déconnecter cette session</a
+   >
+    <form name="ficheIndexDemandeOccupantForm" method="post" action="/espace-client-v2/occupant/ficheIndexDemande.do">
+      <input type="hidden" name="_csrf" value="{{CSRF}}" />
+      <input type="hidden" name="dispatch" value="{{DISPATCH}}" />
+      <input type="hidden" name="mode" value="" />
+      <input type="hidden" name="focus" value="" />
+      <input type="hidden" name="uex.adressePostale" value="
+        1 RUE DE L&#39;EXEMPLE
+        00000 VILLE-FICTIVE
+    " />
+      <input type="hidden" name="tableauBordAccessible" value="true" id="pageAvecTableauBord" />
+      <input type="hidden" name="indexDemandeDisponible" value="true" id="pageAvecIndexDemande" />
+      <input type="hidden" name="indexDemandeEauDisponible" value="{{WATER}}" id="pageAvecIndexDemandeEau" />
+      <input type="hidden" name="indexDemandeChauffageRfcDisponible" value="{{HEATING_INDEX}}" id="pageAvecIndexDemandeChauffageRfc" />
+      <input type="hidden" name="ammAccessible" value="true" id="pageAvecAMM" />
+      <input type="hidden" name="ammEauAccessible" value="true" id="pageAvecAMMEau" />
+      <input type="hidden" name="ammChauffageRfcAccessible" value="false" id="pageAvecAMMChauffageRfc" />
+      <input type="hidden" name="logement.chauffageDisponible" value="{{HEATING}}" id="pageAvecChauffage" />
+      <input type="hidden" name="logement.eauDisponible" value="{{WATER}}" id="pageAvecEau" />
+      <input type="hidden" name="nombreDeCompteur" value="{{METERS}}" id="nombreDeCompteur" />
+      <input type="hidden" name="indexChoisi" value="{{CHOSEN}}" id="indexChoisi" />
+      <input type="hidden" name="dateDebutPeriodeIndex" value="{{FROM}}" />
+      <input type="hidden" name="dateMaxIndex" value="{{DATE_MAX}}" />
+      <input type="hidden" name="dateMinIndex" value="20260101" />
+      <input type="hidden" id="idChoixOnglet" name="choixOnglet" value="EAU" />
+      <div class="pagePrincipale">
+        <div id="ficheIndexDemande">
+          <div id="ongletEau">
+            <div class="gridster" id="gridster_EAU">
+              <table>
+                <tr>
+                  <td class="zoneIndexDemande">
+                    <input type="text" name="dateIndexDemande" value="{{DAY}}" readonly="readonly" id="choixDateIndexDemande" />
+                  </td>
+                </tr>
+                <tr>
+                  <td class="zoneIndexDemande">
+                    <input type="text" readonly="true" id="choixDateDebutPeriodeIndex" />
+                  </td>
+                </tr>
+                <tr>
+                  <td class="zoneChoixIndexDemande">
+                    <input type="button" name="" value="Rechercher index" id="btnExtraireIndexDemande" class="btn-primary btn-large" />
+                  </td>
+                </tr>
+              </table>
+              {{WATER_RESULT}}
+            </div>
+          </div>
+          <div id="ongletChauffage">{{HEATING_TAB}}</div>
+        </div>
+      </div>
+    </form>
+  </body>
+</html>

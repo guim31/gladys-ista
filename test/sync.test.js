@@ -2,20 +2,24 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { statSync } from 'node:fs';
 import { join } from 'node:path';
-import { addDays, localDay, stateInstant, BACKFILL_DAYS, WATER_STATUS } from '../src/sync.js';
+import { addDays, localDay, stateInstant } from '../src/sync.js';
 import { KINDS } from '../src/ista/parse.js';
-import { ACCOUNT, createFakePortal, jsonFixture } from './helpers/fakePortal.js';
+import { ACCOUNT, createFakePortal, fixture, meterBlocks } from './helpers/fakePortal.js';
 import { setup } from './helpers/setup.js';
 
-const HEATING = 'calculeConsommationChauffageRfcPourLogement';
-const COLD_WATER = 'calculeConsommationEauFroidePourLogement';
-const reads = (portal) => portal.requests.filter((r) => r.url.includes('ficheLogement.do'));
-const readDays = (portal, dispatch) =>
-  reads(portal)
-    .filter((r) => r.url.includes(`dispatch=${dispatch}`) && r.cookie.includes('JSESSIONID'))
-    .map((r) => new URL(r.url).searchParams.get('start'));
+const pageReads = (portal) =>
+  portal.requests.filter((r) => r.method === 'GET' && r.url.includes('ficheIndexDemande.do'));
+const searchDays = (portal, dispatch = 'voirIndexDemande') =>
+  portal.searches
+    .filter((form) => form.get('dispatch') === dispatch)
+    .map((form) =>
+      form.get(
+        dispatch === 'voirIndexDemande' ? 'dateIndexDemande' : 'dateIndexDemandeChauffageRfc',
+      ),
+    );
+const DEVICE = 'ext:test-integration:dwelling:main';
 
-test('the first reading backfills the last days and publishes the dwelling', async (t) => {
+test('the first reading publishes the water meters, dated with their reading date', async (t) => {
   const { gladys, portal } = await setup(t);
   assert.deepEqual(gladys.fake.discoveredDevices, [], 'nothing to show before the portal answers');
 
@@ -23,121 +27,198 @@ test('the first reading backfills the last days and publishes the dwelling', asy
   assert.equal(ack.success, true);
   assert.match(
     ack.data.message.fr,
-    /Répartiteurs : 3, compteurs d’eau : 0\. Dernier relevé : 2026-10-11/,
+    /Répartiteurs : 0, compteurs d’eau : 2\. Dernier relevé : 2026-10-10/,
   );
-  assert.match(ack.data.message.de, /Heizkostenverteiler: 3/);
+  assert.match(ack.data.message.de, /Wasserzähler: 2/);
+  // The latest date the page allows, over one day.
+  assert.deepEqual(searchDays(portal), ['10/10/2026']);
+  assert.equal(portal.searches[0].get('dateDebutPeriodeIndex'), '09/10/2026');
 
-  assert.deepEqual(readDays(portal, HEATING), [
-    '2026-10-05',
-    '2026-10-06',
-    '2026-10-07',
-    '2026-10-08',
-    '2026-10-09',
-    '2026-10-10',
-    '2026-10-11',
-  ]);
   const [device] = gladys.fake.discoveredDevices;
-  assert.equal(device.external_id, 'ext:test-integration:dwelling:main');
+  assert.equal(device.external_id, DEVICE);
   assert.equal(device.name, 'Logement ista');
   assert.equal(device.should_poll, false);
   assert.deepEqual(
-    device.features.map((f) => [f.external_id.split(':').at(-1), f.name]),
+    device.features.map((f) => [f.external_id.split(':').at(-1), f.unit, f.name]),
     [
-      ['heating-daily', 'Unités de chauffage du jour'],
-      ['point-100001', 'Radiateur SEJOUR — n° 90000001'],
-      ['point-100002', 'Radiateur CHAMBRE 1 — n° 90000002'],
-      ['point-100003', 'Radiateur SALLE DE BAINS — n° 90000003'],
+      ['point-900000101', 'cubicmeter', 'Eau froide CUISINE — n° 900000101'],
+      ['point-900000202', 'cubicmeter', 'Eau chaude SALLE DE BAINS — n° 900000202'],
     ],
   );
-
-  // Each day dated with its own day, so the charts put it in the right place.
-  const states = gladys.fake.states;
-  assert.equal(states.length, BACKFILL_DAYS * 4);
-  const daily = states.filter((s) => s.device_feature_external_id.endsWith(':heating-daily'));
+  // One meter per fluid: no total. An estimated index is the portal's index too.
   assert.deepEqual(
-    daily.map((s) => s.created_at),
-    ['05', '06', '07', '08', '09', '10', '11'].map((d) => stateInstant(`2026-10-${d}`)),
+    gladys.fake.states.map((s) => [
+      s.device_feature_external_id.split(':').at(-1),
+      s.state,
+      s.created_at,
+    ]),
+    [
+      ['point-900000101', 123.456, stateInstant('2026-10-10')],
+      ['point-900000202', 45.678, stateInstant('2026-10-10')],
+    ],
   );
-  assert.equal(daily[0].state, 16.5); // 12 + 3 + 1.5 weighted units
-  assert.equal(gladys.fake.lastState(`${device.external_id}:point-100001`), 1520);
   assert.deepEqual(gladys.fake.connectionStatus, { connected: true });
 });
 
-test('later readings only ask for the days not read yet', async (t) => {
-  const { gladys, portal, sync, clock } = await setup(t);
+test('later runs search again only when the portal has a newer date', async (t) => {
+  const { gladys, portal, sync } = await setup(t);
   await sync.refresh();
-  const before = reads(portal).length;
+  await sync.refresh();
+  assert.equal(portal.searches.length, 1, 'same latest date: the page only, no search');
+  assert.equal(pageReads(portal).length, 3); // first GET before the sign-in, then one per run
 
+  portal.index.dateMax = '20261012';
   await sync.refresh();
-  assert.equal(reads(portal).length, before, 'same day: nothing new to ask');
-
-  clock.now = new Date('2026-10-13T10:00:00');
-  await sync.refresh();
-  assert.deepEqual(readDays(portal, HEATING).slice(BACKFILL_DAYS), ['2026-10-12']);
-  assert.equal(gladys.fake.states.length, (BACKFILL_DAYS + 1) * 4);
+  assert.deepEqual(searchDays(portal), ['10/10/2026', '12/10/2026']);
+  assert.equal(portal.searches[1].get('dateDebutPeriodeIndex'), '11/10/2026');
+  assert.equal(sync.state.lastDay[KINDS.COLD_WATER], '2026-10-12');
+  assert.equal(gladys.fake.states.length, 4);
+  assert.equal(gladys.fake.states.at(-1).created_at, stateInstant('2026-10-12'));
 });
 
-test('a day the portal has not filled in is asked again at the next run', async (t) => {
-  let pendingFrom = '2026-10-10';
+test('a meter without a readable index publishes nothing, never a 0', async (t) => {
   const portal = createFakePortal({
-    answer: (dispatch, day) => {
-      if (dispatch !== HEATING) {
-        return new Response('', { status: 404 });
-      }
-      return day >= pendingFrom
-        ? jsonFixture('heating-day-pending.json')
-        : jsonFixture('heating-day.json');
-    },
+    answer: (dispatch, form) =>
+      meterBlocks(
+        'index-water-meters.html',
+        form.get('dateDebutPeriodeIndex'),
+        form.get('dateIndexDemande'),
+      )
+        .replace(/(Index relevé<\/div>\s*<div class="value">)\s*45\.678/, '$1 ')
+        .replace(/(id="indexCompteur_1"[^>]*>)\s*45\.678/, '$1 '),
+  });
+  const { gladys, sync } = await setup(t, { portal });
+  await gladys.fake.action('test_connection', {});
+  assert.deepEqual(
+    gladys.fake.states.map((s) => s.device_feature_external_id.split(':').at(-1)),
+    ['point-900000101'],
+  );
+  // Nor a hot water index in the widget.
+  assert.deepEqual(sync.state.daily, [{ day: '2026-10-10', cold_water: 123.456 }]);
+  assert.deepEqual(
+    gladys.fake.discoveredDevices[0].features.map((f) => f.external_id.split(':').at(-1)),
+    ['point-900000101'],
+  );
+});
+
+test('several meters of a fluid get a total, left out when one is missing', async (t) => {
+  const twoCold = (from, day) =>
+    meterBlocks('index-water-meters.html', from, day)
+      .replace('EAU CHAUDE', 'EAU FROIDE')
+      .replace('ESTIME', 'REEL');
+  let blocks = twoCold;
+  const portal = createFakePortal({
+    answer: (dispatch, form) =>
+      blocks(form.get('dateDebutPeriodeIndex'), form.get('dateIndexDemande')),
   });
   const { gladys, sync } = await setup(t, { portal });
   await sync.refresh();
-  assert.equal(sync.state.lastDay[KINDS.HEATING], '2026-10-09');
-  // Stopped at the first missing day: 10-11 was not asked.
-  assert.deepEqual(readDays(portal, HEATING).slice(-1), ['2026-10-10']);
-  assert.equal(gladys.fake.states.length, 5 * 4);
+  assert.equal(gladys.fake.lastState(`${DEVICE}:cold-water-total`), 169.134);
 
-  pendingFrom = '2026-10-12';
+  // Next date, one meter missing from the answer: its own index only.
+  blocks = (from, day) =>
+    twoCold(from, day).replace(
+      /<div class="le-compteur">[\s\S]*?(?=<div class="le-compteur">)/,
+      '',
+    );
+  portal.index.dateMax = '20261011';
   await sync.refresh();
-  assert.deepEqual(readDays(portal, HEATING).slice(-2), ['2026-10-10', '2026-10-11']);
-  assert.equal(sync.state.lastDay[KINDS.HEATING], '2026-10-11');
+  const lastDay = gladys.fake.states.filter((s) => s.created_at === stateInstant('2026-10-11'));
+  assert.deepEqual(
+    lastDay.map((s) => s.device_feature_external_id.split(':').at(-1)),
+    ['point-900000202'],
+  );
 });
 
-test('water pages the portal does not know hide the water features, and are not asked again', async (t) => {
-  const { portal, sync } = await setup(t);
-  await sync.refresh();
-  assert.equal(sync.state.water[KINDS.COLD_WATER], WATER_STATUS.UNAVAILABLE);
-  assert.equal(sync.state.water[KINDS.HOT_WATER], WATER_STATUS.UNAVAILABLE);
-  assert.equal(readDays(portal, COLD_WATER).length, 1, 'one probe, not one per day');
-  const count = reads(portal).length;
-  await sync.refreshIfDue();
-  await sync.refresh();
-  assert.equal(reads(portal).length, count);
+test('a dwelling the index page offers no water for: nothing asked, nothing invented', async (t) => {
+  const portal = createFakePortal({ index: { water: false } });
+  const { gladys, sync } = await setup(t, { portal });
+  const result = await sync.refresh();
+  assert.equal(result.ok, true);
+  assert.equal(portal.searches.length, 0);
+  assert.deepEqual(gladys.fake.discoveredDevices, []);
+  assert.equal(gladys.fake.states.length, 0);
 });
 
-test('water meters, when the portal answers, become volume features with a total', async (t) => {
+test('heating, when the page offers it, adds the radiators and the units of the day (hypothetical page)', async (t) => {
   const portal = createFakePortal({
-    answer: (dispatch) =>
-      dispatch === HEATING
-        ? jsonFixture('heating-day.json')
-        : dispatch === COLD_WATER
-          ? jsonFixture('cold-water-day.json')
-          : new Response('', { status: 404 }),
+    index: { heating: true, heatingIndex: true, heatingMax: '2026/10/10' },
   });
   const { gladys, sync } = await setup(t, { portal });
   const ack = await gladys.fake.action('test_connection', {});
-  assert.match(ack.data.message.en, /water meters: 2/);
-  assert.equal(sync.state.water[KINDS.COLD_WATER], WATER_STATUS.AVAILABLE);
+  assert.match(ack.data.message.en, /Heat cost allocators: 2, water meters: 2/);
+  assert.deepEqual(searchDays(portal, 'voirIndexDemandeChauffageRfc'), ['10/10/2026']);
   const [device] = gladys.fake.discoveredDevices;
-  const water = device.features.filter((f) => f.category === 'volume-sensor');
   assert.deepEqual(
-    water.map((f) => [f.external_id.split(':').at(-1), f.unit, f.name]),
-    [
-      ['cold-water-total', 'cubicmeter', 'Eau froide — total'],
-      ['point-200001', 'cubicmeter', 'Eau froide CUISINE — n° EF-0000001'],
-      ['point-200002', 'cubicmeter', 'Eau froide SALLE DE BAINS — n° EF-0000002'],
-    ],
+    device.features.map((f) => f.external_id.split(':').at(-1)),
+    ['heating-daily', 'point-800000301', 'point-800000302', 'point-900000101', 'point-900000202'],
   );
-  assert.equal(gladys.fake.lastState(`${device.external_id}:cold-water-total`), 168.956);
+  assert.equal(gladys.fake.lastState(`${DEVICE}:heating-daily`), 16.5);
+  // The heating search starts from the page the water search answered (the
+  // portal renews the CSRF token on every page; the fake one only accepts the
+  // latest).
+  assert.deepEqual(
+    portal.searches.map((form) => form.get('_csrf')),
+    ['csrf-1', 'csrf-2'],
+  );
+  assert.equal(gladys.fake.lastState(`${DEVICE}:point-800000301`), 1520);
+  assert.equal(sync.state.lastDay[KINDS.HEATING], '2026-10-10');
+});
+
+test('heating follows its own range of dates', async (t) => {
+  const portal = createFakePortal({
+    index: { heating: true, heatingIndex: true, heatingMax: '2026/10/08' },
+  });
+  const { sync } = await setup(t, { portal });
+  await sync.refresh();
+  await sync.refresh();
+  // Water at 10/10, heating at 08/10, then nothing newer for either.
+  assert.deepEqual(searchDays(portal, 'voirIndexDemandeChauffageRfc'), ['08/10/2026']);
+  assert.equal(portal.searches.length, 2);
+  portal.index.heatingMax = '2026/10/09';
+  await sync.refresh();
+  assert.deepEqual(searchDays(portal, 'voirIndexDemandeChauffageRfc'), [
+    '08/10/2026',
+    '09/10/2026',
+  ]);
+  assert.equal(searchDays(portal).length, 1);
+});
+
+test('a heating search that fails does not stop the water readings', async (t) => {
+  const portal = createFakePortal({
+    index: { heating: true, heatingIndex: true, heatingMax: '2026/10/10' },
+    answer: (dispatch, form) =>
+      dispatch === 'voirIndexDemandeChauffageRfc'
+        ? new Response('<html>Erreur</html>', { status: 500 })
+        : meterBlocks(
+            'index-water-meters.html',
+            form.get('dateDebutPeriodeIndex'),
+            form.get('dateIndexDemande'),
+          ),
+  });
+  const { gladys, sync } = await setup(t, { portal });
+  const result = await sync.refresh();
+  assert.equal(result.ok, true);
+  assert.equal(gladys.fake.states.length, 2);
+  assert.deepEqual(gladys.fake.connectionStatus, { connected: true });
+});
+
+test('heating alone: a failing heating search is reported', async (t) => {
+  const portal = createFakePortal({
+    index: { water: false, heating: true, heatingIndex: true, heatingMax: '2026/10/10' },
+    answer: () => new Response('<html>Erreur</html>', { status: 500 }),
+  });
+  const { gladys, sync } = await setup(t, { portal });
+  assert.equal((await sync.refresh()).ok, false);
+  assert.equal(gladys.fake.connectionStatus.connected, false);
+});
+
+test('the init page fixture keeps the structure of the live page', () => {
+  // Guard against an edit of the fixture that would break the client's view.
+  const page = fixture('index-page.html');
+  assert.match(page, /name="ficheIndexDemandeOccupantForm"/);
+  assert.match(page, /name="dateMaxIndex"/);
+  assert.match(page, /id="choixDateDebutPeriodeIndex"/);
 });
 
 test('a device created after the readings receives them again', async (t) => {
@@ -157,12 +238,12 @@ test('a restart shows the device again without asking the portal', async (t) => 
   await gladys.fake.action('test_connection', {});
   const count = portal.requests.length;
   const state = store.loadState();
-  assert.equal(state.points.length, 3);
-  assert.equal(state.lastDay[KINDS.HEATING], '2026-10-11');
+  assert.equal(state.points.length, 2);
+  assert.equal(state.lastDay[KINDS.COLD_WATER], '2026-10-10');
   await gladys.disconnect();
   await gladys.connect();
   assert.equal(portal.requests.length, count);
-  assert.equal(gladys.fake.discoveredDevices[0].features.length, 4);
+  assert.equal(gladys.fake.discoveredDevices[0].features.length, 2);
 });
 
 test('a refused password is shown in the Configuration screen, in every language', async (t) => {
@@ -223,7 +304,7 @@ test('the timer reads the portal, then waits for the interval', async (t) => {
   assert.equal(sync.nextRunAt.getTime() - clock.now.getTime(), 10_000, 'first run soon');
   t.mock.timers.tick(10_000);
   await sync.running;
-  assert.ok(reads(portal).length > 0);
+  assert.equal(portal.searches.length, 1);
   // Rescheduled after the run settles.
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(sync.nextRunAt.getTime() - clock.now.getTime(), 12 * 3600 * 1000);
@@ -246,18 +327,19 @@ test('the integration reads the portal on its own, without onPoll', async (t) =>
   t.mock.timers.tick(10_000);
   await settle();
   assert.equal(gladys.fake.discoveredDevices[0].should_poll, false);
-  assert.equal(sync.state.lastDay[KINDS.HEATING], '2026-10-11');
+  assert.equal(sync.state.lastDay[KINDS.COLD_WATER], '2026-10-10');
 
-  // Twelve hours later, the next day is read, and the one after.
-  for (const [now, day] of [
-    ['2026-10-13T08:00:00', '2026-10-12'],
-    ['2026-10-13T20:00:00', '2026-10-12'],
-    ['2026-10-14T08:00:00', '2026-10-13'],
+  // Twelve hours later, the portal's next date is read, and the one after.
+  for (const [now, dateMax, day] of [
+    ['2026-10-13T08:00:00', '20261011', '2026-10-11'],
+    ['2026-10-13T20:00:00', '20261011', '2026-10-11'],
+    ['2026-10-14T08:00:00', '20261012', '2026-10-12'],
   ]) {
     clock.now = new Date(now);
+    portal.index.dateMax = dateMax;
     t.mock.timers.tick(12 * 3600 * 1000);
     await settle();
-    assert.equal(sync.state.lastDay[KINDS.HEATING], day);
+    assert.equal(sync.state.lastDay[KINDS.COLD_WATER], day);
   }
-  assert.deepEqual(readDays(portal, HEATING).slice(BACKFILL_DAYS), ['2026-10-12', '2026-10-13']);
+  assert.deepEqual(searchDays(portal), ['10/10/2026', '11/10/2026', '12/10/2026']);
 });

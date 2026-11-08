@@ -13,8 +13,10 @@
 //     a total per fluid when the dwelling has several meters of it.
 //
 // External ids are forever: the device id is fixed (one dwelling per account,
-// see the README), the feature ids derive from the counting point number the
-// portal gives, which follows the radiator or the meter slot, not a label.
+// see the README), the feature ids derive from the meter number the portal
+// gives ("Numéro du compteur": the serial of the meter or allocator), not a
+// label. A replaced meter has a new number, so a new feature: its history
+// starts again, as the index itself does.
 // -----------------------------------------------------------------------------
 
 import {

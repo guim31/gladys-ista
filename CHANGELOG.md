@@ -10,6 +10,24 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Fixed
+
+- No reading came in ("Unknown format" status): the consumption page the
+  integration asked for answers HTML on the current portal. The readings now
+  come from the portal's "index à la demande" page, the one the portal shows
+  under "Index à la demande": the water meters (cold and hot), each with its
+  index, dated with its reading date. Checked against pages shared by a
+  resident.
+
+### Changed
+
+- Water meters are named after their number (`— no. …`), and are no longer
+  marked unverified. Heating (heat cost allocators) uses the heating tab of the
+  same page, only when the portal offers it: still unverified, and its failure
+  no longer stops the water readings.
+- One reading per run at most, at the latest date the portal offers, instead
+  of a catch-up over the last 7 days.
+
 ## [1.0.2] - 2026-10-13
 
 ### Added
