@@ -388,7 +388,12 @@ export class IstaClient {
         },
       );
     }
-    return { form, ...describeIndexForm(form) };
+    return {
+      form,
+      ...describeIndexForm(form),
+      // The heating tab has its own range of readings, when it has a tab.
+      heatingMaxDay: looseDay(form.byId[HEATING_INPUT_IDS.lastDay]?.value),
+    };
   }
 
   /**
@@ -396,7 +401,9 @@ export class IstaClient {
    * allows, over a one-day period.
    * @param {object} page what openIndexPage() returned
    * @param {'water'|'heating'} family
-   * @returns {Promise<Array>} the meters (parse.js `parseMeters`)
+   * @returns {Promise<{ meters: Array, page: object }>} the meters
+   *   (parse.js `parseMeters`), and the answer page: its form carries the
+   *   CSRF token of the next search (the portal renews it on every page).
    */
   async searchIndexes(page, family) {
     const kind = family === 'heating' ? KINDS.HEATING : KINDS.COLD_WATER;
@@ -414,12 +421,15 @@ export class IstaClient {
         {},
       );
     }
-    return parseMeters(result.body, kind);
+    return { meters: parseMeters(result.body, kind), page: this.indexPageOf(result) };
   }
 
   /** The form a browser sends for the search: every field, a few set. */
   searchFields(page, family) {
-    const fields = new URLSearchParams(page.form.fields);
+    // A browser sends the line breaks of a value (the postal address) as CRLF.
+    const fields = new URLSearchParams(
+      page.form.fields.map(([name, value]) => [name, value.replace(/\r?\n/g, '\r\n')]),
+    );
     const set = (name, value) => fields.set(name, value);
     if (family === 'heating') {
       const ids = page.form.byId;
@@ -430,13 +440,12 @@ export class IstaClient {
           inputs: Object.keys(ids),
         });
       }
-      const day = looseDay(ids[HEATING_INPUT_IDS.lastDay]?.value) ?? page.maxDay;
+      const day = page.heatingMaxDay ?? page.maxDay;
       const first = looseDay(ids[HEATING_INPUT_IDS.firstDay]?.value) ?? page.minDay;
       if (!day) {
         throw new UnexpectedAnswerError('the heating index form has no date range', {});
       }
       set('dispatch', DISPATCHES.HEATING);
-      set('choixOnglet', 'CHAUFFAGE');
       set(dayName, dayToFrench(day));
       set(fromName, dayToFrench(periodStart(day, first)));
       return fields;

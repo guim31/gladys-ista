@@ -328,7 +328,9 @@ export class IstaSync {
 
   async readLatest() {
     let requests = 1;
-    const page = await this.client.openIndexPage();
+    // Each search answers the page again, with a new CSRF token: the next
+    // search starts from the latest page.
+    let page = await this.client.openIndexPage();
     const meters = [];
 
     if (!page.water) {
@@ -340,11 +342,13 @@ export class IstaSync {
     } else {
       await this.pause();
       requests += 1;
-      meters.push(...(await this.client.searchIndexes(page, 'water')));
+      const water = await this.client.searchIndexes(page, 'water');
+      meters.push(...water.meters);
+      page = water.page;
     }
 
     if (page.heatingIndex) {
-      if (!this.hasReadings([KINDS.HEATING], page.maxDay)) {
+      if (!this.hasReadings([KINDS.HEATING], page.heatingMaxDay ?? page.maxDay)) {
         await this.pause();
         requests += 1;
         meters.push(...(await this.readHeating(page, meters.length > 0 || page.water)));
@@ -391,7 +395,7 @@ export class IstaSync {
    */
   async readHeating(page, hasWater) {
     try {
-      const meters = await this.client.searchIndexes(page, 'heating');
+      const { meters } = await this.client.searchIndexes(page, 'heating');
       if (this.heatingFailure) {
         this.logger.info('The heating readings answer again');
         this.heatingFailure = false;
@@ -421,6 +425,8 @@ export class IstaSync {
     const states = [];
     const readable = meters.filter((meter) => meter.index !== null && meter.day);
     const groups = new Map();
+    // Meters of each fluid the portal listed in this answer.
+    const listed = (kind) => meters.filter((meter) => meter.kind === kind).length;
     for (const meter of readable) {
       const key = `${meter.day}|${meter.kind}`;
       groups.set(key, [...(groups.get(key) ?? []), meter]);
@@ -436,17 +442,19 @@ export class IstaSync {
         consumption:
           kind === KINDS.HEATING && meter.from !== addDays(day, -1) ? null : meter.consumption,
       }));
-      // A total needs every meter of the fluid: one missing from this answer
-      // keeps the total out (statesOfDay only sees the meters it is given).
-      const expected = this.state.points.filter((point) => point.kind === kind).length;
-      const complete = points.length >= expected;
+      // A total needs every meter of the fluid the portal listed: one without
+      // an index (or another date) keeps the total out. Counted on the answer,
+      // not on the meters ever seen: a replaced meter leaves the portal's list.
+      const complete = points.length === listed(kind);
       const created_at = stateInstant(day);
       for (const state of statesOfDay(kind, points)) {
         if (complete || !TOTAL_KEYS.has(state.key)) {
           states.push({ ...state, created_at });
         }
       }
-      this.recordDaily(day, kind, points);
+      if (complete) {
+        this.recordDaily(day, kind, points);
+      }
       this.state.lastDay[kind] = day;
     }
     return states;

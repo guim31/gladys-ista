@@ -110,6 +110,7 @@ export function createFakePortal(options = {}) {
     },
     expireSessions() {
       portal.sessions.clear();
+      csrfTokens.clear();
     },
   };
   let sessionCounter = 0;
@@ -133,6 +134,9 @@ export function createFakePortal(options = {}) {
   const indexPage = (extra = {}) => {
     csrfCounter += 1;
     const csrf = `csrf-${csrfCounter}`;
+    // Strict: only the token of the latest page is accepted (the live portal
+    // renews it on every page; whether it refuses an older one is unknown).
+    csrfTokens.clear();
     csrfTokens.add(csrf);
     return html(renderIndexPage({ ...portal.index, csrf, ...extra }));
   };

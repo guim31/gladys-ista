@@ -33,7 +33,7 @@ const indexRequests = (portal) =>
 /** Open the index page and search the water indexes, as a run does. */
 async function readWater(ista) {
   const page = await ista.openIndexPage();
-  return ista.searchIndexes(page, 'water');
+  return (await ista.searchIndexes(page, 'water')).meters;
 }
 
 function client(portal, config = {}, sessionStore = memorySessionStore()) {
@@ -72,7 +72,8 @@ test('signs in, opens the index page and searches the latest water indexes', asy
   assert.equal(search.get('dateIndexDemande'), '10/10/2026');
   assert.equal(search.get('dateDebutPeriodeIndex'), '09/10/2026');
   assert.equal(search.get('dateMaxIndex'), '20261010');
-  assert.match(search.get('uex.adressePostale'), /VILLE-FICTIVE/);
+  // Line breaks sent as CRLF, entities decoded, as a browser does.
+  assert.match(search.get('uex.adressePostale'), /RUE DE L'EXEMPLE\r\n\s+00000 VILLE-FICTIVE/);
   assert.match(indexRequests(portal)[2].cookie, /JSESSIONID=session-1/);
   // The session survives a restart.
   assert.ok(sessionStore.saved.some((c) => c.name === 'JSESSIONID'));
@@ -92,7 +93,7 @@ test('a session lost between the page and the search: one sign-in, a fresh form'
   await readWater(ista);
   const page = await ista.openIndexPage();
   portal.expireSessions();
-  const meters = await ista.searchIndexes(page, 'water');
+  const { meters } = await ista.searchIndexes(page, 'water');
   assert.equal(meters.length, 2);
   assert.equal(portal.logins, 2);
   // The search after the sign-in carries the token of the page opened again.
@@ -107,7 +108,7 @@ test('the heating search uses the heating tab fields (hypothetical page)', async
   const ista = client(portal);
   const page = await ista.openIndexPage();
   assert.equal(page.heatingIndex, true);
-  const meters = await ista.searchIndexes(page, 'heating');
+  const { meters } = await ista.searchIndexes(page, 'heating');
   assert.deepEqual(
     meters.map((m) => [m.id, m.kind, m.index, m.day]),
     [
@@ -117,7 +118,8 @@ test('the heating search uses the heating tab fields (hypothetical page)', async
   );
   const [search] = portal.searches;
   assert.equal(search.get('dispatch'), 'voirIndexDemandeChauffageRfc');
-  assert.equal(search.get('choixOnglet'), 'CHAUFFAGE');
+  // The tab is only shown by the page script: the field is sent as it is.
+  assert.equal(search.get('choixOnglet'), 'EAU');
   assert.equal(search.get('dateIndexDemandeChauffageRfc'), '08/10/2026');
   assert.equal(search.get('dateDebutPeriodeIndexChauffageRfc'), '07/10/2026');
 });

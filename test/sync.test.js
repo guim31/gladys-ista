@@ -87,12 +87,14 @@ test('a meter without a readable index publishes nothing, never a 0', async (t) 
         .replace(/(Index relevé<\/div>\s*<div class="value">)\s*45\.678/, '$1 ')
         .replace(/(id="indexCompteur_1"[^>]*>)\s*45\.678/, '$1 '),
   });
-  const { gladys } = await setup(t, { portal });
+  const { gladys, sync } = await setup(t, { portal });
   await gladys.fake.action('test_connection', {});
   assert.deepEqual(
     gladys.fake.states.map((s) => s.device_feature_external_id.split(':').at(-1)),
     ['point-900000101'],
   );
+  // Nor a hot water index in the widget.
+  assert.deepEqual(sync.state.daily, [{ day: '2026-10-10', cold_water: 123.456 }]);
   assert.deepEqual(
     gladys.fake.discoveredDevices[0].features.map((f) => f.external_id.split(':').at(-1)),
     ['point-900000101'],
@@ -152,8 +154,34 @@ test('heating, when the page offers it, adds the radiators and the units of the 
     ['heating-daily', 'point-800000301', 'point-800000302', 'point-900000101', 'point-900000202'],
   );
   assert.equal(gladys.fake.lastState(`${DEVICE}:heating-daily`), 16.5);
+  // The heating search starts from the page the water search answered (the
+  // portal renews the CSRF token on every page; the fake one only accepts the
+  // latest).
+  assert.deepEqual(
+    portal.searches.map((form) => form.get('_csrf')),
+    ['csrf-1', 'csrf-2'],
+  );
   assert.equal(gladys.fake.lastState(`${DEVICE}:point-800000301`), 1520);
   assert.equal(sync.state.lastDay[KINDS.HEATING], '2026-10-10');
+});
+
+test('heating follows its own range of dates', async (t) => {
+  const portal = createFakePortal({
+    index: { heating: true, heatingIndex: true, heatingMax: '2026/10/08' },
+  });
+  const { sync } = await setup(t, { portal });
+  await sync.refresh();
+  await sync.refresh();
+  // Water at 10/10, heating at 08/10, then nothing newer for either.
+  assert.deepEqual(searchDays(portal, 'voirIndexDemandeChauffageRfc'), ['08/10/2026']);
+  assert.equal(portal.searches.length, 2);
+  portal.index.heatingMax = '2026/10/09';
+  await sync.refresh();
+  assert.deepEqual(searchDays(portal, 'voirIndexDemandeChauffageRfc'), [
+    '08/10/2026',
+    '09/10/2026',
+  ]);
+  assert.equal(searchDays(portal).length, 1);
 });
 
 test('a heating search that fails does not stop the water readings', async (t) => {

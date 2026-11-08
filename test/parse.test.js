@@ -5,6 +5,7 @@ import {
   UnexpectedAnswerError,
   addDays,
   classifyMeter,
+  decodeHtml,
   dayToFrench,
   describeIndexForm,
   fieldValue,
@@ -138,6 +139,13 @@ test('the hypothetical heating answer reads like the water one', () => {
       ['800000301', KINDS.HEATING, 'SEJOUR', 1520, 12, '2026-10-10'],
       ['800000302', KINDS.HEATING, 'CHAMBRE', 640, 4.5, '2026-10-10'],
     ],
+  );
+});
+
+test('entities are decoded as a browser does', () => {
+  assert.equal(
+    decodeHtml('R&eacute;sidence &#xE9;t&#233; &laquo;A&raquo; &amp;eacute;'),
+    'Résidence été «A» &eacute;',
   );
 });
 

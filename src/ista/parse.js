@@ -36,6 +36,34 @@ export class UnexpectedAnswerError extends Error {
   }
 }
 
+// The accented letters of French labels and addresses, as the portal may
+// write them (&amp; is decoded last, so "&amp;eacute;" stays text).
+const NAMED_ENTITIES = {
+  lt: '<',
+  gt: '>',
+  apos: "'",
+  laquo: '«',
+  raquo: '»',
+  agrave: 'à',
+  acirc: 'â',
+  ccedil: 'ç',
+  eacute: 'é',
+  egrave: 'è',
+  ecirc: 'ê',
+  euml: 'ë',
+  icirc: 'î',
+  iuml: 'ï',
+  ocirc: 'ô',
+  ugrave: 'ù',
+  ucirc: 'û',
+  uuml: 'ü',
+  Eacute: 'É',
+  Egrave: 'È',
+  Agrave: 'À',
+  Ccedil: 'Ç',
+  deg: '°',
+};
+
 export function decodeHtml(value) {
   return value
     .replace(/&nbsp;/g, ' ')
@@ -45,6 +73,8 @@ export function decodeHtml(value) {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&#(\d+);/g, (_, code) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([0-9a-f]+);/gi, (_, code) => String.fromCodePoint(Number.parseInt(code, 16)))
+    .replace(/&([a-z]+);/gi, (entity, name) => NAMED_ENTITIES[name] ?? entity)
     .replace(/&amp;/g, '&');
 }
 
