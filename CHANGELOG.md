@@ -10,6 +10,11 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Fixed
+
+- 1.1.0 could not read the indexes ("no index form"): the index page is now opened through its
+  menu entry, as the portal expects; opened directly it has no form.
+
 ## [1.1.0] - 2026-11-08
 
 ### Fixed

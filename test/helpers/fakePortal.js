@@ -101,6 +101,7 @@ export function createFakePortal(options = {}) {
     logins: 0,
     authenticateHits: 0,
     sessions: new Set(),
+    indexMenuOpened: new Set(),
     index: {
       water: true,
       heating: false,
@@ -197,6 +198,15 @@ export function createFakePortal(options = {}) {
         'SRV=web01; Path=/',
       ]);
     }
+    if (url.origin === PORTAL && url.pathname === '/espace-client-v2/menu.do') {
+      if (!signedIn) {
+        return toHome();
+      }
+      if (url.searchParams.get('id') === 'lgtOcc_index') {
+        portal.indexMenuOpened.add(cookies.JSESSIONID);
+      }
+      return redirect(`${PORTAL}/espace-client-v2/occupant/ficheIndexDemande.do`);
+    }
     if (
       url.origin === PORTAL &&
       url.pathname === '/espace-client-v2/occupant/ficheIndexDemande.do'
@@ -205,7 +215,10 @@ export function createFakePortal(options = {}) {
         return toHome();
       }
       if (method === 'GET') {
-        return indexPage();
+        // Like the live portal: opened without its menu entry, the page has no form.
+        return portal.indexMenuOpened.has(cookies.JSESSIONID)
+          ? indexPage()
+          : html('<html><body>Index à la demande</body></html>');
       }
       const form = new URLSearchParams(init.body);
       portal.searches.push(form);

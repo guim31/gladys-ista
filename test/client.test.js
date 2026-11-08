@@ -27,8 +27,14 @@ function memorySessionStore() {
   return store;
 }
 
+// Opening the page goes through its menu entry (GET menu.do, redirected to the page);
+// a search is a POST of the page's form.
 const indexRequests = (portal) =>
-  portal.requests.filter((r) => r.url.includes('ficheIndexDemande.do'));
+  portal.requests.filter(
+    (r) =>
+      r.url.includes('menu.do?id=lgtOcc_index') ||
+      (r.method === 'POST' && r.url.includes('ficheIndexDemande.do')),
+  );
 
 /** Open the index page and search the water indexes, as a run does. */
 async function readWater(ista) {

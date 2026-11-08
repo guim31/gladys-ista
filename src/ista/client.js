@@ -42,6 +42,10 @@ export const ENTRY_URL = `${PORTAL_ORIGIN}/espace-client-v2/public/home.do?dispa
 // before giving up on finding the form.
 const MAX_LOGIN_LINK_HOPS = 2;
 export const INDEX_URL = `${PORTAL_ORIGIN}/espace-client-v2/occupant/ficheIndexDemande.do`;
+// The menu entry "Index à la demande": the portal prepares the index page in
+// the session, then redirects to INDEX_URL. Opened directly, INDEX_URL answers
+// a page without the form (seen on a live account, 2026-11-08).
+export const INDEX_MENU_URL = `${PORTAL_ORIGIN}/espace-client-v2/menu.do?id=lgtOcc_index`;
 
 // The `dispatch` values of the index form (ficheIndexDemandeOccupant.js on the
 // portal). Water: seen on a live account (2026-11-08). Heating (heat cost
@@ -371,7 +375,7 @@ export class IstaClient {
    * `describeIndexForm`).
    */
   async openIndexPage() {
-    const result = await this.signedInRequest(() => [INDEX_URL, {}]);
+    const result = await this.signedInRequest(() => [INDEX_MENU_URL, {}]);
     return this.indexPageOf(result);
   }
 

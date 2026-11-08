@@ -7,8 +7,9 @@ import { KINDS } from '../src/ista/parse.js';
 import { ACCOUNT, createFakePortal, fixture, meterBlocks } from './helpers/fakePortal.js';
 import { setup } from './helpers/setup.js';
 
+// The index page is opened through its menu entry (menu.do, redirected to the page).
 const pageReads = (portal) =>
-  portal.requests.filter((r) => r.method === 'GET' && r.url.includes('ficheIndexDemande.do'));
+  portal.requests.filter((r) => r.method === 'GET' && r.url.includes('menu.do?id=lgtOcc_index'));
 const searchDays = (portal, dispatch = 'voirIndexDemande') =>
   portal.searches
     .filter((form) => form.get('dispatch') === dispatch)
