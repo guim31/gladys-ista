@@ -112,6 +112,10 @@ code de ce dépôt. Compléter ce fichier quand un nouveau piège est découvert
   `login.ista.com/realms/dsp-webconso-fr` (`username`, `password`, `credentialId` caché, pas de
   captcha). Partir de `dispatch=authenticate`, et traiter une page `public/` comme une session
   perdue. **Connexion confirmée par un résident le 08/11/2026** (mot de passe comme cookie).
+  **Le portail répond sur `ista-webconso.fr` et `www.ista-webconso.fr`** (le navigateur est sur www) : le
+  retour de connexion peut arriver sur l'autre nom et y poser un cookie de session « host-only ».
+  `CookieJar({ sharedDomain })` garde ces cookies pour les deux noms (1.1.5, 09/11/2026 : deux résidents
+  « connectés » renvoyés aussitôt à l'accueil public).
 - **Relevés ista : la page « index à la demande »** (vérifiée le 08/11/2026 sur les pages d'un
   résident, fil 11109). **L'ouvrir par son entrée de menu, depuis le tableau de bord** (`GET occupant/tableauBordLogement.do?dispatch=init`, puis `GET /espace-client-v2/menu.do?id=lgtOcc_index` avec ce tableau de bord en `Referer` : même connecté, `menu.do` collé dans un navigateur renvoie à l'accueil public et au choix du rôle, constaté par un résident le 09/11/2026 ; 1.1.4)
   (le portail prépare la page dans la session puis redirige vers `occupant/ficheIndexDemande.do`) :

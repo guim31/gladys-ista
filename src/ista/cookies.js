@@ -49,7 +49,15 @@ function domainMatches(cookie, hostname) {
 }
 
 export class CookieJar {
-  constructor(cookies = []) {
+  /**
+   * @param {object[]} [cookies]
+   * @param {object} [options]
+   * @param {string} [options.sharedDomain] a site served under both `domain` and `www.domain`:
+   *   their host-only cookies are kept for both, like one site (the portal answers on both, and
+   *   its sign-in may come back on the other one).
+   */
+  constructor(cookies = [], { sharedDomain } = {}) {
+    this.sharedDomain = sharedDomain;
     this.cookies = [];
     for (const cookie of cookies) {
       this.set(cookie);
@@ -78,6 +86,11 @@ export class CookieJar {
     for (const header of headers) {
       const cookie = parseSetCookie(header, url);
       if (cookie) {
+        const shared = this.sharedDomain;
+        if (shared && cookie.hostOnly && [shared, `www.${shared}`].includes(cookie.domain)) {
+          cookie.domain = shared;
+          cookie.hostOnly = false;
+        }
         this.set(cookie);
       }
     }

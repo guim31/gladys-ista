@@ -10,6 +10,12 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Fixed
+
+- The session of the sign-in was lost when the portal came back on `www.ista-webconso.fr` while the
+  integration read `ista-webconso.fr`: both names now share the session cookies. A sign-in that
+  ends on the public home page is now reported as such.
+
 ## [1.1.4] - 2026-11-09
 
 ### Fixed

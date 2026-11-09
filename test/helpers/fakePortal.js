@@ -52,6 +52,7 @@ export const ACCOUNT = {
 };
 
 const PORTAL = 'https://ista-webconso.fr';
+const WWW_PORTAL = 'https://www.ista-webconso.fr';
 const LOGIN = 'https://login.ista.com/realms/dsp-webconso-fr';
 
 function cookiesOf(headers) {
@@ -187,10 +188,18 @@ export function createFakePortal(options = {}) {
           return html(fixture(options.afterLogin));
         }
         portal.logins += 1;
-        return redirect(`${PORTAL}/espace-client-v2/callback?code=ONE-TIME-CODE&state=STATE`);
+        // options.wwwCallback: the identity server sends back to www.ista-webconso.fr, which
+        // then sets a host-only session cookie there (the live portal answers on both hosts).
+        const callbackOrigin = options.wwwCallback ? WWW_PORTAL : PORTAL;
+        return redirect(
+          `${callbackOrigin}/espace-client-v2/callback?code=ONE-TIME-CODE&state=STATE`,
+        );
       }
     }
-    if (url.origin === PORTAL && url.pathname === '/espace-client-v2/callback') {
+    if (
+      (url.origin === PORTAL || url.origin === WWW_PORTAL) &&
+      url.pathname === '/espace-client-v2/callback'
+    ) {
       sessionCounter += 1;
       const session = `session-${sessionCounter}`;
       portal.sessions.add(session);
