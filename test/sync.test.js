@@ -258,6 +258,14 @@ test('a refused password is shown in the Configuration screen, in every language
   assert.deepEqual(Object.keys(status.message), ['en', 'fr', 'de', 'es']);
 });
 
+test('in password mode, a session the portal does not keep is not called an expired cookie', async (t) => {
+  const { gladys } = await setup(t, { portal: createFakePortal({ menuToHome: true }) });
+  const ack = await gladys.fake.action('test_connection', {});
+  assert.equal(ack.success, false);
+  assert.match(ack.error.fr, /sans garder la session/);
+  assert.doesNotMatch(ack.error.fr, /cookie/);
+});
+
 test('without credentials, nothing is asked to the portal', async (t) => {
   const { gladys, portal } = await setup(t, { config: {} });
   const ack = await gladys.fake.action('test_connection', {});

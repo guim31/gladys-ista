@@ -10,6 +10,11 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Fixed
+
+- In e-mail and password mode, a session the portal does not keep no longer says "the session
+  cookie has expired".
+
 ## [1.1.6] - 2026-11-09
 
 ### Fixed
