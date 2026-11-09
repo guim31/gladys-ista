@@ -102,6 +102,7 @@ export function createFakePortal(options = {}) {
     authenticateHits: 0,
     sessions: new Set(),
     indexMenuOpened: new Set(),
+    dashboardSeen: new Set(),
     index: {
       water: true,
       heating: false,
@@ -198,8 +199,22 @@ export function createFakePortal(options = {}) {
         'SRV=web01; Path=/',
       ]);
     }
+    if (
+      url.origin === PORTAL &&
+      url.pathname === '/espace-client-v2/occupant/tableauBordLogement.do'
+    ) {
+      if (!signedIn) {
+        return toHome();
+      }
+      portal.dashboardSeen.add(cookies.JSESSIONID);
+      return html('<html><body>Tableau de bord</body></html>');
+    }
     if (url.origin === PORTAL && url.pathname === '/espace-client-v2/menu.do') {
-      if (!signedIn || options.menuToHome) {
+      // Like the live portal: the menu entry only works when followed from the dashboard.
+      const fromDashboard =
+        portal.dashboardSeen.has(cookies.JSESSIONID) &&
+        (init.headers?.Referer ?? '').includes('/occupant/tableauBordLogement.do');
+      if (!signedIn || options.menuToHome || !fromDashboard) {
         return toHome();
       }
       if (url.searchParams.get('id') === 'lgtOcc_index') {

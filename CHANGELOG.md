@@ -10,6 +10,12 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Fixed
+
+- Right after signing in, the portal sent the integration back to its public home page ("the portal
+  still asks to sign in"): the index page is now opened from the resident's dashboard, as a click
+  in the browser does.
+
 ## [1.1.3] - 2026-11-08
 
 ### Changed
