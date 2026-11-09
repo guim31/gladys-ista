@@ -31,6 +31,8 @@ function parseSetCookie(header, requestUrl) {
       cookie.hostOnly = false;
     } else if (key === 'path' && value.startsWith('/')) {
       cookie.path = value;
+    } else if (key === 'samesite') {
+      cookie.sameSite = value.toLowerCase();
     } else if (key === 'max-age' && Number(value) <= 0) {
       cookie.expired = true;
     } else if (key === 'expires' && Date.parse(value) < Date.now()) {
@@ -97,10 +99,17 @@ export class CookieJar {
   }
 
   /** The `Cookie` header for a request to `requestUrl` ('' when none matches). */
-  headerFor(requestUrl) {
+  /**
+   * @param {string} requestUrl
+   * @param {object} [options]
+   * @param {boolean} [options.crossSite] the request comes from another site (a redirect chain that
+   *   went through it): `SameSite=Strict` cookies stay home, as in a browser.
+   */
+  headerFor(requestUrl, { crossSite = false } = {}) {
     const url = new URL(requestUrl);
     return this.cookies
       .filter((c) => domainMatches(c, url.hostname) && url.pathname.startsWith(c.path))
+      .filter((c) => !(crossSite && c.sameSite === 'strict'))
       .map((c) => `${c.name}=${c.value}`)
       .join('; ');
   }

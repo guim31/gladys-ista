@@ -213,6 +213,14 @@ test('an unknown login page is reported as a portal change', async () => {
   await assert.rejects(ista.login(), (err) => err.code === AUTH_ERRORS.LOGIN_FORM_NOT_FOUND);
 });
 
+test('the sign-in callback goes without the pre-login SameSite=Strict session, like a browser', async () => {
+  const portal = createFakePortal({ strictCallback: true });
+  const ista = client(portal);
+  const meters = await readWater(ista);
+  assert.equal(meters.length, 2);
+  assert.equal(portal.logins, 1);
+});
+
 test('a sign-in that comes back on www.ista-webconso.fr keeps its session on the portal', async () => {
   const portal = createFakePortal({ wwwCallback: true });
   const ista = client(portal);

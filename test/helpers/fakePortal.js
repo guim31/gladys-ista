@@ -165,7 +165,19 @@ export function createFakePortal(options = {}) {
       if (url.searchParams.get('dispatch') === 'authenticate') {
         portal.authenticateHits += 1;
         // `homeFirst`: the first sign-in attempt lands on the home page again.
-        return options.homeFirst && portal.authenticateHits === 1 ? toHome() : toLogin();
+        if (options.homeFirst && portal.authenticateHits === 1) {
+          return toHome();
+        }
+        if (options.strictCallback) {
+          // Like the live portal: a pre-login session, SameSite=Strict.
+          const response = toLogin();
+          response.headers.append(
+            'Set-Cookie',
+            'JSESSIONID=pre-login; Path=/espace-client-v2; Secure; HttpOnly; SameSite=Strict',
+          );
+          return response;
+        }
+        return toLogin();
       }
       return html(fixture('public-home.html'));
     }
@@ -200,6 +212,11 @@ export function createFakePortal(options = {}) {
       (url.origin === PORTAL || url.origin === WWW_PORTAL) &&
       url.pathname === '/espace-client-v2/callback'
     ) {
+      if (options.strictCallback && cookies.JSESSIONID === 'pre-login') {
+        // `strictCallback`: the live portal fails when the callback carries the pre-login session
+        // (a browser keeps that SameSite=Strict cookie out of a cross-site redirect).
+        return redirect(`${PORTAL}/espace-client-v2/public/loginIpmp.do`);
+      }
       sessionCounter += 1;
       const session = `session-${sessionCounter}`;
       portal.sessions.add(session);

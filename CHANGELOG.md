@@ -10,6 +10,11 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Fixed
+
+- The sign-in ended on an ista error page (`loginIpmp.do`): coming back from the identity server,
+  the integration now leaves out the portal's `SameSite=Strict` session cookie, as a browser does.
+
 ## [1.1.5] - 2026-11-09
 
 ### Fixed
