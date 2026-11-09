@@ -113,7 +113,7 @@ code de ce dépôt. Compléter ce fichier quand un nouveau piège est découvert
   captcha). Partir de `dispatch=authenticate`, et traiter une page `public/` comme une session
   perdue. **Connexion confirmée par un résident le 08/11/2026** (mot de passe comme cookie).
 - **Relevés ista : la page « index à la demande »** (vérifiée le 08/11/2026 sur les pages d'un
-  résident, fil 11109). **L'ouvrir par son entrée de menu** `GET /espace-client-v2/menu.do?id=lgtOcc_index`
+  résident, fil 11109). **L'ouvrir par son entrée de menu, depuis le tableau de bord** (`GET occupant/tableauBordLogement.do?dispatch=init`, puis `GET /espace-client-v2/menu.do?id=lgtOcc_index` avec ce tableau de bord en `Referer` : même connecté, `menu.do` collé dans un navigateur renvoie à l'accueil public et au choix du rôle, constaté par un résident le 09/11/2026 ; 1.1.4)
   (le portail prépare la page dans la session puis redirige vers `occupant/ficheIndexDemande.do`) :
   ouverte directement, la page n'a **aucun formulaire** (1.1.0, constaté chez un résident le
   08/11/2026 ; `global.js` : `menu(id)` → `../menu.do?id=`). L'ancienne page JSON `ficheLogement.do?dispatch=calculeConsommation…`

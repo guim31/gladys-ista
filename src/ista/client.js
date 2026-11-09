@@ -46,6 +46,10 @@ export const INDEX_URL = `${PORTAL_ORIGIN}/espace-client-v2/occupant/ficheIndexD
 // the session, then redirects to INDEX_URL. Opened directly, INDEX_URL answers
 // a page without the form (seen on a live account, 2026-11-08).
 export const INDEX_MENU_URL = `${PORTAL_ORIGIN}/espace-client-v2/menu.do?id=lgtOcc_index`;
+// The resident's dashboard, where the browser lands after choosing "Résident". Even signed in,
+// menu.do pasted in a browser sends back to the public home page (role choice, 2026-11-09):
+// the menu entry is followed from the dashboard, with it as Referer, like a click.
+export const DASHBOARD_URL = `${PORTAL_ORIGIN}/espace-client-v2/occupant/tableauBordLogement.do?dispatch=init`;
 
 // The `dispatch` values of the index form (ficheIndexDemandeOccupant.js on the
 // portal). Water: seen on a live account (2026-11-08). Heating (heat cost
@@ -212,7 +216,7 @@ export class IstaClient {
    * and replays its cookies. A POST answered by a redirect continues as a GET.
    * @returns {Promise<{ status, url, contentType, body }>}
    */
-  async request(url, { method = 'GET', form, accept } = {}) {
+  async request(url, { method = 'GET', form, accept, referer } = {}) {
     let currentUrl = url;
     let currentMethod = method;
     let body = form ? new URLSearchParams(form).toString() : undefined;
@@ -228,6 +232,9 @@ export class IstaClient {
       }
       if (body !== undefined) {
         headers['Content-Type'] = 'application/x-www-form-urlencoded';
+      }
+      if (referer && currentUrl === url) {
+        headers.Referer = referer;
       }
       const response = await this.fetch(currentUrl, {
         method: currentMethod,
@@ -383,7 +390,12 @@ export class IstaClient {
    * `describeIndexForm`).
    */
   async openIndexPage() {
-    const result = await this.signedInRequest(() => [INDEX_MENU_URL, {}]);
+    // Dashboard first, then its menu entry (see DASHBOARD_URL); both again after a new sign-in.
+    const open = async () => {
+      const dashboard = await this.request(DASHBOARD_URL);
+      return [INDEX_MENU_URL, { referer: dashboard.url }];
+    };
+    const result = await this.signedInRequest(open);
     return this.indexPageOf(result);
   }
 
