@@ -190,7 +190,8 @@ export class IstaClient {
     this.fetch = fetch;
     this.sessionStore = sessionStore;
     this.logger = logger ?? createLogger({ name: 'ista' });
-    this.jar = new CookieJar(this.initialCookies());
+    // The portal answers on ista-webconso.fr and www.ista-webconso.fr: one session for both.
+    this.jar = new CookieJar(this.initialCookies(), { sharedDomain: PORTAL_DOMAIN });
     this.signedIn = false;
   }
 
@@ -328,6 +329,13 @@ export class IstaClient {
       throw new AuthError(
         AUTH_ERRORS.LOGIN_FORM_NOT_FOUND,
         `the login ended at ${safeUrl(result.url)} instead of the portal`,
+      );
+    }
+    if (new URL(result.url).pathname.includes('/public/')) {
+      // Back on the public home page: the portal did not keep the session of this sign-in.
+      throw new AuthError(
+        AUTH_ERRORS.SESSION_EXPIRED,
+        `the sign-in ended on the public page ${safeUrl(result.url)}: no session kept`,
       );
     }
     this.saveSession();
