@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [1.1.6] - 2026-11-09
+
 ### Fixed
 
 - The sign-in ended on an ista error page (`loginIpmp.do`): coming back from the identity server,
@@ -100,7 +102,8 @@ the notes of the version's GitHub Release.
   dashboard widget.
 - Every text in English, French, German and Spanish.
 
-[Unreleased]: https://github.com/guim31/gladys-ista/compare/v1.1.5...HEAD
+[Unreleased]: https://github.com/guim31/gladys-ista/compare/v1.1.6...HEAD
+[1.1.6]: https://github.com/guim31/gladys-ista/compare/v1.1.5...v1.1.6
 [1.1.5]: https://github.com/guim31/gladys-ista/compare/v1.1.4...v1.1.5
 [1.1.4]: https://github.com/guim31/gladys-ista/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/guim31/gladys-ista/compare/v1.1.2...v1.1.3
