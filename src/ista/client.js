@@ -221,13 +221,20 @@ export class IstaClient {
     let currentUrl = url;
     let currentMethod = method;
     let body = form ? new URLSearchParams(form).toString() : undefined;
+    // Once a redirect chain has gone through another site (login.ista.com back to the portal), a
+    // browser keeps the portal's SameSite=Strict session cookie out of it: the sign-in callback then
+    // starts a fresh session. Sending the pre-login one made the portal fail on loginIpmp.do
+    // (« Une erreur interne est survenue », two residents, 2026-11-09).
+    const siteOf = (address) => new URL(address).hostname.split('.').slice(-2).join('.');
+    let crossSite = false;
     for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
+      crossSite = crossSite || siteOf(currentUrl) !== siteOf(url);
       const headers = {
         'User-Agent': USER_AGENT,
         Accept: accept ?? 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
         'Accept-Language': 'fr-FR,fr;q=0.9',
       };
-      const cookie = this.jar.headerFor(currentUrl);
+      const cookie = this.jar.headerFor(currentUrl, { crossSite });
       if (cookie) {
         headers.Cookie = cookie;
       }
