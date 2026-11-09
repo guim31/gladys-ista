@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [1.1.5] - 2026-11-09
+
 ### Fixed
 
 - The session of the sign-in was lost when the portal came back on `www.ista-webconso.fr` while the
@@ -93,7 +95,8 @@ the notes of the version's GitHub Release.
   dashboard widget.
 - Every text in English, French, German and Spanish.
 
-[Unreleased]: https://github.com/guim31/gladys-ista/compare/v1.1.4...HEAD
+[Unreleased]: https://github.com/guim31/gladys-ista/compare/v1.1.5...HEAD
+[1.1.5]: https://github.com/guim31/gladys-ista/compare/v1.1.4...v1.1.5
 [1.1.4]: https://github.com/guim31/gladys-ista/compare/v1.1.3...v1.1.4
 [1.1.3]: https://github.com/guim31/gladys-ista/compare/v1.1.2...v1.1.3
 [1.1.2]: https://github.com/guim31/gladys-ista/compare/v1.1.1...v1.1.2
