@@ -299,7 +299,11 @@ export class IstaSync {
 
   async handleError(err) {
     if (err instanceof AuthError) {
-      const textKey = AUTH_STATUS_TEXTS[err.code] ?? 'status_invalid_credentials';
+      // In password mode a lost session is not an expired pasted cookie (Jluc, t/11109/35).
+      const textKey =
+        err.code === AUTH_ERRORS.SESSION_EXPIRED && this.config.auth_mode !== 'cookie'
+          ? 'status_session_not_kept'
+          : (AUTH_STATUS_TEXTS[err.code] ?? 'status_invalid_credentials');
       this.logFailure(
         textKey,
         'warn',

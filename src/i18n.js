@@ -63,6 +63,12 @@ export const TEXTS = {
     de: 'Anmeldeseite nicht erkannt: Das Portal hat sich geändert, siehe Doku.',
     es: 'Página de inicio de sesión no reconocida: el portal ha cambiado, vea la documentación.',
   },
+  status_session_not_kept: {
+    en: 'The portal accepted the sign-in but did not keep the session: please report it on the forum.',
+    fr: 'Le portail a accepté la connexion sans garder la session : signalez-le sur le forum.',
+    de: 'Das Portal hat die Anmeldung angenommen, aber die Sitzung nicht behalten: Melde es im Forum.',
+    es: 'El portal aceptó la conexión pero no mantuvo la sesión: indíquelo en el foro.',
+  },
   status_session_expired: {
     en: 'The session cookie has expired: paste a new one.',
     fr: 'Le cookie de session a expiré : collez-en un nouveau.',
