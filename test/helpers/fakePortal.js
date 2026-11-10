@@ -51,8 +51,8 @@ export const ACCOUNT = {
   password: 'S3cret-Passw0rd!',
 };
 
-const PORTAL = 'https://ista-webconso.fr';
-const WWW_PORTAL = 'https://www.ista-webconso.fr';
+const PORTAL = 'https://www.ista-webconso.fr';
+const WWW_PORTAL = 'https://ista-webconso.fr';
 const LOGIN = 'https://login.ista.com/realms/dsp-webconso-fr';
 
 function cookiesOf(headers) {

@@ -10,6 +10,11 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Fixed
+
+- The integration now works on `www.ista-webconso.fr` from start to end, as the browser does
+  (seen on a resident's sign-in on 2026-11-10).
+
 ## [1.1.7] - 2026-11-09
 
 ### Fixed

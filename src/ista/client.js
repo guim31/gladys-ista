@@ -33,7 +33,9 @@ import {
 } from './parse.js';
 
 export const PORTAL_DOMAIN = 'ista-webconso.fr';
-export const PORTAL_ORIGIN = `https://${PORTAL_DOMAIN}`;
+// The browser works on www.ista-webconso.fr from start to end (login seen on 2026-11-10):
+// the integration does the same, so that every cookie and redirect stays on one name.
+export const PORTAL_ORIGIN = `https://www.${PORTAL_DOMAIN}`;
 // The "Se connecter" link of the portal's public home page: it redirects to
 // ista's Keycloak login form, with the right redirect back. (The bare
 // resident space URL only lands on that public home page, which has no form.)

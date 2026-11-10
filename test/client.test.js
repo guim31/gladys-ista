@@ -160,9 +160,9 @@ test('the public home page is followed to Keycloak, and a fake account is refuse
       .slice(0, 4)
       .map((u) => `${u.host}${u.pathname}?${u.searchParams.get('dispatch') ?? ''}`),
     [
-      'ista-webconso.fr/espace-client-v2/public/home.do?authenticate',
-      'ista-webconso.fr/espace-client-v2/public/home.do?init',
-      'ista-webconso.fr/espace-client-v2/public/home.do?authenticate',
+      'www.ista-webconso.fr/espace-client-v2/public/home.do?authenticate',
+      'www.ista-webconso.fr/espace-client-v2/public/home.do?init',
+      'www.ista-webconso.fr/espace-client-v2/public/home.do?authenticate',
       'login.ista.com/realms/dsp-webconso-fr/protocol/openid-connect/auth?',
     ],
   );
@@ -236,7 +236,7 @@ test('a sign-in that does not hold says where the portal sent us, never what it 
     assert.equal(err.code, AUTH_ERRORS.SESSION_EXPIRED);
     assert.match(
       err.message,
-      /public page at ista-webconso\.fr\/espace-client-v2\/public\/home\.do/,
+      /public page at www\.ista-webconso\.fr\/espace-client-v2\/public\/home\.do/,
     );
     assert.ok(!err.message.includes('?'), 'no query string');
     return true;
