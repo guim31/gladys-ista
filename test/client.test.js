@@ -6,8 +6,10 @@ import {
   AuthError,
   IstaClient,
   PortalError,
+  describeHop,
   findAuthenticateLink,
   findLoginForm,
+  findPageRedirect,
   periodStart,
   safeUrl,
 } from '../src/ista/client.js';
@@ -219,6 +221,159 @@ test('the sign-in callback goes without the pre-login SameSite=Strict session, l
   const meters = await readWater(ista);
   assert.equal(meters.length, 2);
   assert.equal(portal.logins, 1);
+});
+
+test('the callback page (public/loginIpmp.do, HTTP 200) is not a lost session: the dashboard decides', async () => {
+  // 1.1.5 to 1.1.7 stopped on this page because of its /public/ address ("no session kept").
+  const portal = createFakePortal({ callback: 'page', strictCallback: true });
+  const meters = await readWater(client(portal));
+  assert.equal(meters.length, 2);
+  assert.equal(portal.logins, 1);
+  const paths = portal.requests.map((r) => new URL(r.url).pathname);
+  const callback = paths.indexOf('/espace-client-v2/public/loginIpmp.do');
+  assert.equal(paths[callback + 1], '/espace-client-v2/occupant/tableauBordLogement.do');
+});
+
+test('the script of the callback page is followed like a browser, never its logout button', async () => {
+  const portal = createFakePortal({ strictCallback: true });
+  await client(portal).login();
+  const callback = portal.requests.findIndex((r) => r.url.includes('/public/loginIpmp.do'));
+  const next = portal.requests[callback + 1];
+  assert.match(next.url, /\/occupant\/tableauBordLogement\.do\?dispatch=init$/);
+  // Same-site navigation from the callback page: the new SameSite=Strict session goes along.
+  assert.match(next.cookie, /JSESSIONID=session-1/);
+  assert.match(
+    next.referer,
+    /^https:\/\/ista-webconso\.fr\/espace-client-v2\/public\/loginIpmp\.do/,
+  );
+  assert.ok(!portal.requests.some((r) => r.url.includes('logout')));
+});
+
+test('the sign-in sends Referer and Origin as a browser does', async () => {
+  const portal = createFakePortal({ strictCallback: true });
+  await client(portal).login();
+  const post = portal.requests.find((r) => r.method === 'POST');
+  assert.equal(post.origin, 'https://login.ista.com');
+  assert.match(post.referer, /^https:\/\/login\.ista\.com\/realms\/dsp-webconso-fr\/protocol\//);
+  // Back on the portal, another origin: the identity server's origin only.
+  const callback = portal.requests.find((r) => r.url.includes('/public/loginIpmp.do'));
+  assert.equal(callback.referer, 'https://login.ista.com/');
+  assert.equal(callback.origin, undefined);
+  assert.ok(!callback.cookie.includes('pre-login'));
+});
+
+test('a session the portal does not keep: the log lists the sign-in hops, names only', async () => {
+  const portal = createFakePortal({ callback: 'lost', strictCallback: true });
+  await assert.rejects(client(portal).login(), (err) => {
+    assert.equal(err.code, AUTH_ERRORS.SESSION_EXPIRED);
+    assert.match(
+      err.message,
+      /the resident dashboard answered a public page at ista-webconso\.fr\/espace-client-v2\/public\/home\.do/,
+    );
+    assert.match(
+      err.message,
+      /sign-in steps: GET ista-webconso\.fr\/espace-client-v2\/public\/home\.do\?dispatch 302 set\[JSESSIONID\]/,
+    );
+    assert.match(
+      err.message,
+      /POST login\.ista\.com\/realms\/dsp-webconso-fr\/login-actions\/authenticate\?session_code,execution,client_id,tab_id,client_data 302 sent\[AUTH_SESSION_ID\]/,
+    );
+    assert.match(
+      err.message,
+      /GET ista-webconso\.fr\/espace-client-v2\/public\/loginIpmp\.do\?dispatch,session_state,iss,code 200 set\[JSESSIONID\]/,
+    );
+    for (const value of [
+      'ONE-TIME-CODE',
+      'SESSION-STATE',
+      'session-1',
+      'pre-login',
+      'auth-1',
+      ACCOUNT.email,
+      ACCOUNT.password,
+    ]) {
+      assert.ok(!err.message.includes(value), `no ${value}`);
+    }
+    return true;
+  });
+});
+
+test('the portal error page after the identity server is told as such', async () => {
+  const portal = createFakePortal({ callback: 'error' });
+  await assert.rejects(client(portal).login(), (err) => {
+    assert.equal(err.code, AUTH_ERRORS.SESSION_EXPIRED);
+    assert.match(
+      err.message,
+      /error page at ista-webconso\.fr\/espace-client-v2\/public\/loginIpmp\.do \(HTTP 200\)/,
+    );
+    assert.match(err.message, /sign-in steps: /);
+    return true;
+  });
+  // Nothing after the error page: neither its logout button nor the dashboard.
+  assert.match(portal.requests.at(-1).url, /\/public\/loginIpmp\.do\?/);
+});
+
+test('describeHop keeps names, never values, except an OAuth error code', () => {
+  assert.equal(
+    describeHop(
+      'GET',
+      'https://ista-webconso.fr/espace-client-v2/public/loginIpmp.do?dispatch=loginTenant&code=SECRET',
+      200,
+      {
+        sent: ['ApplicationGatewayAffinity'],
+        set: ['JSESSIONID'],
+      },
+    ),
+    'GET ista-webconso.fr/espace-client-v2/public/loginIpmp.do?dispatch,code 200 sent[ApplicationGatewayAffinity] set[JSESSIONID]',
+  );
+  assert.equal(
+    describeHop(
+      'GET',
+      'https://ista-webconso.fr/x?error=temporarily_unavailable&error_description=authentication expired <b>',
+      200,
+    ),
+    'GET ista-webconso.fr/x?error,error_description 200 error=temporarily_unavailable error_description=authentication_expired__b_',
+  );
+});
+
+test('findPageRedirect follows a meta refresh or a script, on the portal only', () => {
+  const page =
+    'https://ista-webconso.fr/espace-client-v2/public/loginIpmp.do?dispatch=loginTenant&code=X';
+  assert.equal(
+    findPageRedirect(fixture('callback-bounce.html'), page),
+    'https://ista-webconso.fr/espace-client-v2/occupant/tableauBordLogement.do?dispatch=init',
+  );
+  assert.equal(
+    findPageRedirect(
+      '<meta http-equiv="refresh" content="0; url=/espace-client-v2/occupant/a.do">',
+      page,
+    ),
+    'https://ista-webconso.fr/espace-client-v2/occupant/a.do',
+  );
+  assert.equal(
+    findPageRedirect(
+      '<script>window.location.replace("https://www.ista-webconso.fr/espace-client-v2/b.do")</script>',
+      page,
+    ),
+    'https://www.ista-webconso.fr/espace-client-v2/b.do',
+  );
+  // Never: a button, a logout, a new sign-in, another site, a script file.
+  assert.equal(findPageRedirect(fixture('callback-error.html'), page), null);
+  assert.equal(
+    findPageRedirect("<script>location.href='../public/login.do?dispatch=logout'</script>", page),
+    null,
+  );
+  assert.equal(
+    findPageRedirect("<script>location.href='home.do?dispatch=authenticate'</script>", page),
+    null,
+  );
+  assert.equal(
+    findPageRedirect("<script>location.href='https://evil.example/'</script>", page),
+    null,
+  );
+  assert.equal(
+    findPageRedirect('<script src="/x.js">location.href="/espace-client-v2/c.do"</script>', page),
+    null,
+  );
 });
 
 test('a sign-in that comes back on www.ista-webconso.fr keeps its session on the portal', async () => {

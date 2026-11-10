@@ -6,6 +6,7 @@
 // -----------------------------------------------------------------------------
 
 import { readFileSync } from 'node:fs';
+import { CALLBACK_PATH } from '../../src/ista/client.js';
 
 export const FIXTURES = new URL('../fixtures/portal/', import.meta.url);
 
@@ -91,6 +92,11 @@ function html(body, setCookies = [], status = 200) {
  * @param {object} [options.index] what the index page offers: `water`
  *   (true), `heating` and `heatingIndex` (false), `dateMax` (`YYYYMMDD`,
  *   20261010), `heatingMax` (`YYYY/MM/DD`)
+ * @param {'bounce'|'page'|'redirect'|'lost'|'error'} [options.callback] how the sign-in callback
+ *   (public/loginIpmp.do) answers a good code: a page whose script goes to the dashboard
+ *   (default), a page that goes nowhere, a redirect, a page without a session, the error page
+ * @param {boolean} [options.strictCallback] a pre-login SameSite=Strict session, which makes the
+ *   callback fail when it comes back with it
  * @param {Function} [options.answer] `(dispatch, form) => string | Response`,
  *   the meter blocks of a search (form: the posted URLSearchParams); defaults
  *   to the water fixture for water and the heating one for heating
@@ -148,11 +154,18 @@ export function createFakePortal(options = {}) {
     const url = new URL(input);
     const method = init.method ?? 'GET';
     const cookies = cookiesOf(init.headers);
-    portal.requests.push({ method, url: url.toString(), cookie: init.headers?.Cookie ?? '' });
+    portal.requests.push({
+      method,
+      url: url.toString(),
+      cookie: init.headers?.Cookie ?? '',
+      referer: init.headers?.Referer,
+      origin: init.headers?.Origin,
+    });
     const signedIn = portal.sessions.has(cookies.JSESSIONID);
+    // Like the live portal: no redirect_uri nor state, the client's own redirect_uri applies.
     const toLogin = () =>
       redirect(
-        `${LOGIN}/protocol/openid-connect/auth?client_id=dsp-webconso-fr&response_type=code&redirect_uri=${encodeURIComponent(`${PORTAL}/espace-client-v2/callback`)}&state=STATE`,
+        `${LOGIN}/protocol/openid-connect/auth?client_id=dsp-webconso-fr&response_type=code`,
       );
 
     const toHome = () => redirect(`${PORTAL}/espace-client-v2/public/home.do?dispatch=init`);
@@ -203,30 +216,46 @@ export function createFakePortal(options = {}) {
         // options.wwwCallback: the identity server sends back to www.ista-webconso.fr, which
         // then sets a host-only session cookie there (the live portal answers on both hosts).
         const callbackOrigin = options.wwwCallback ? WWW_PORTAL : PORTAL;
+        // Like the live identity server: back to the redirect_uri of its client, with a code.
         return redirect(
-          `${callbackOrigin}/espace-client-v2/callback?code=ONE-TIME-CODE&state=STATE`,
+          `${callbackOrigin}${CALLBACK_PATH}?dispatch=loginTenant&session_state=SESSION-STATE&iss=${encodeURIComponent(LOGIN)}&code=ONE-TIME-CODE`,
         );
       }
     }
-    if (
-      (url.origin === PORTAL || url.origin === WWW_PORTAL) &&
-      url.pathname === '/espace-client-v2/callback'
-    ) {
-      if (options.strictCallback && cookies.JSESSIONID === 'pre-login') {
-        // `strictCallback`: the live portal fails when the callback carries the pre-login session
-        // (a browser keeps that SameSite=Strict cookie out of a cross-site redirect).
-        return redirect(`${PORTAL}/espace-client-v2/public/loginIpmp.do`);
+    if ((url.origin === PORTAL || url.origin === WWW_PORTAL) && url.pathname === CALLBACK_PATH) {
+      // Like the live portal (checked with a made-up code, 2026-11-10): a bad callback answers
+      // its error page, HTTP 200, at the callback address.
+      const callbackFails =
+        options.callback === 'error' ||
+        !url.searchParams.get('code') ||
+        // `strictCallback`: the pre-login session (SameSite=Strict) must not come back with it.
+        (options.strictCallback && cookies.JSESSIONID === 'pre-login');
+      if (callbackFails) {
+        return html(fixture('callback-error.html'));
       }
       sessionCounter += 1;
       const session = `session-${sessionCounter}`;
-      portal.sessions.add(session);
-      return redirect(`${PORTAL}/espace-client-v2/`, [
-        `JSESSIONID=${session}; Path=/espace-client-v2; HttpOnly`,
-        'SRV=web01; Path=/',
-      ]);
+      const mode = options.callback ?? 'bounce';
+      if (mode !== 'lost') {
+        portal.sessions.add(session);
+      }
+      if (mode === 'redirect') {
+        // A plain redirect: only works with a session cookie that is not SameSite=Strict.
+        return redirect(`${PORTAL}/espace-client-v2/`, [
+          `JSESSIONID=${session}; Path=/espace-client-v2; HttpOnly`,
+          'SRV=web01; Path=/',
+        ]);
+      }
+      // `bounce` (default): a page whose script goes on to the dashboard. `page`: a page that
+      // goes nowhere (a server-side forward). `lost`: the same, but no session behind the cookie.
+      // The success answer was never seen: hypotheses, all ending on the callback address.
+      const strictSession = `JSESSIONID=${session}; Path=/espace-client-v2; Secure; HttpOnly; SameSite=Strict`;
+      return mode === 'bounce'
+        ? html(fixture('callback-bounce.html'), [strictSession])
+        : html('<html><body>Chargement en cours...</body></html>', [strictSession]);
     }
     if (
-      url.origin === PORTAL &&
+      (url.origin === PORTAL || url.origin === WWW_PORTAL) &&
       url.pathname === '/espace-client-v2/occupant/tableauBordLogement.do'
     ) {
       if (!signedIn) {

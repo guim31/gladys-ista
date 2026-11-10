@@ -120,6 +120,15 @@ code de ce dépôt. Compléter ce fichier quand un nouveau piège est découvert
   Keycloak (redirection venue d'un autre site), le portail ouvre alors une session neuve. Le renvoyer
   fait finir la connexion sur `public/loginIpmp.do` (« Une erreur interne est survenue »). Le client
   imite le navigateur : `headerFor(url, { crossSite })` (1.1.6, 09/11/2026).
+  **Le retour de Keycloak est `public/loginIpmp.do?dispatch=loginTenant`** (redirect_uri du client
+  `dsp-webconso-fr`, lisible en base64 dans le `client_data` de la page de connexion ; la demande
+  d'autorisation n'a ni `redirect_uri` ni `state`). Cette adresse est sous `/public/` et répond une
+  **page** (HTTP 200), pas une redirection ; avec un code inventé, c'est la page « Une erreur interne
+  est survenue » (vérifié le 10/11/2026). Finir la connexion sur `loginIpmp.do` ne prouve donc rien :
+  le client suit ce que la page fait seule (script, meta refresh), puis vérifie la session sur le
+  tableau de bord (1.1.8). Le journal d'échec liste les étapes de la connexion (noms seulement).
+  Hors du proxy des sessions cloud, le portail est joignable : la partie publique du flux se
+  vérifie en direct, sans identifiants (un faux compte est refusé par Keycloak, c'est attendu).
 - **Relevés ista : la page « index à la demande »** (vérifiée le 08/11/2026 sur les pages d'un
   résident, fil 11109). **L'ouvrir par son entrée de menu, depuis le tableau de bord** (`GET occupant/tableauBordLogement.do?dispatch=init`, puis `GET /espace-client-v2/menu.do?id=lgtOcc_index` avec ce tableau de bord en `Referer` : même connecté, `menu.do` collé dans un navigateur renvoie à l'accueil public et au choix du rôle, constaté par un résident le 09/11/2026 ; 1.1.4)
   (le portail prépare la page dans la session puis redirige vers `occupant/ficheIndexDemande.do`) :
