@@ -92,9 +92,10 @@ function html(body, setCookies = [], status = 200) {
  * @param {object} [options.index] what the index page offers: `water`
  *   (true), `heating` and `heatingIndex` (false), `dateMax` (`YYYYMMDD`,
  *   20261010), `heatingMax` (`YYYY/MM/DD`)
- * @param {'bounce'|'page'|'redirect'|'lost'|'error'} [options.callback] how the sign-in callback
- *   (public/loginIpmp.do) answers a good code: a page whose script goes to the dashboard
- *   (default), a page that goes nowhere, a redirect, a page without a session, the error page
+ * @param {'redirect'|'lost'|'error'} [options.callback] how the sign-in callback
+ *   (public/loginIpmp.do) answers a good code: like a resident's browser saw it, a redirect to
+ *   monCompte.do with a new SameSite=Strict session (default); the same without a session behind
+ *   the cookie; its error page
  * @param {boolean} [options.strictCallback] a pre-login SameSite=Strict session, which makes the
  *   callback fail when it comes back with it
  * @param {Function} [options.answer] `(dispatch, form) => string | Response`,
@@ -171,6 +172,9 @@ export function createFakePortal(options = {}) {
     const toHome = () => redirect(`${PORTAL}/espace-client-v2/public/home.do?dispatch=init`);
     // Like the live portal: the bare resident space lands on a public home
     // page whose "Se connecter" link (dispatch=authenticate) leads to Keycloak.
+    if (url.origin === PORTAL && url.pathname === '/espace-client-v2') {
+      return redirect(`${PORTAL}/espace-client-v2/`);
+    }
     if (url.origin === PORTAL && url.pathname === '/espace-client-v2/') {
       return signedIn ? html('<html>Accueil</html>') : toHome();
     }
@@ -235,24 +239,26 @@ export function createFakePortal(options = {}) {
       }
       sessionCounter += 1;
       const session = `session-${sessionCounter}`;
-      const mode = options.callback ?? 'bounce';
-      if (mode !== 'lost') {
+      if (options.callback !== 'lost') {
         portal.sessions.add(session);
       }
-      if (mode === 'redirect') {
-        // A plain redirect: only works with a session cookie that is not SameSite=Strict.
-        return redirect(`${PORTAL}/espace-client-v2/`, [
-          `JSESSIONID=${session}; Path=/espace-client-v2; HttpOnly`,
-          'SRV=web01; Path=/',
-        ]);
-      }
-      // `bounce` (default): a page whose script goes on to the dashboard. `page`: a page that
-      // goes nowhere (a server-side forward). `lost`: the same, but no session behind the cookie.
-      // The success answer was never seen: hypotheses, all ending on the callback address.
-      const strictSession = `JSESSIONID=${session}; Path=/espace-client-v2; Secure; HttpOnly; SameSite=Strict`;
-      return mode === 'bounce'
-        ? html(fixture('callback-bounce.html'), [strictSession])
-        : html('<html><body>Chargement en cours...</body></html>', [strictSession]);
+      // Like a resident's browser (2026-11-10): loginIpmp.do 302 → monCompte.do 302 →
+      // ficheLogement.do → the dashboard. The new session must reach monCompte.do.
+      return redirect(`${PORTAL}/espace-client-v2/monCompte.do?dispatch=init`, [
+        `JSESSIONID=${session}; Path=/espace-client-v2; Secure; HttpOnly; SameSite=Strict`,
+        'SRV=web01; Path=/',
+      ]);
+    }
+    if (url.origin === PORTAL && url.pathname === '/espace-client-v2/monCompte.do') {
+      // Without a session the live page answers the error page, HTTP 200 (checked 2026-11-10).
+      return signedIn
+        ? redirect(`${PORTAL}/espace-client-v2/occupant/ficheLogement.do?dispatch=init`)
+        : html(fixture('callback-error.html'));
+    }
+    if (url.origin === PORTAL && url.pathname === '/espace-client-v2/occupant/ficheLogement.do') {
+      return signedIn
+        ? redirect(`${PORTAL}/espace-client-v2/occupant/tableauBordLogement.do?dispatch=init`)
+        : toHome();
     }
     if (
       (url.origin === PORTAL || url.origin === WWW_PORTAL) &&

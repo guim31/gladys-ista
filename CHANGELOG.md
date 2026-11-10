@@ -12,14 +12,15 @@ the notes of the version's GitHub Release.
 
 ### Fixed
 
-- The sign-in no longer gives up on the page where the identity server sends back
-  (`public/loginIpmp.do`, a public address that answers a page): the integration follows that page
-  like a browser, then checks the session on the resident's dashboard. Referer and Origin are now
-  sent like a browser's.
+- The session that the portal opens when the sign-in comes back (`loginIpmp.do`) now goes along to
+  the next pages (`monCompte.do`, then the dashboard), as in a browser: 1.1.6 and 1.1.7 left it out
+  together with the session opened before the sign-in. The sign-in starts and runs through the
+  same pages as a browser, and sends Referer and Origin like a browser.
 
 ### Changed
 
-- When the portal does not keep the session, the log lists the steps of the sign-in: addresses
+- A sign-in that ends on the portal's error page (`loginIpmp.do` answering instead of redirecting)
+  says so, with the portal's message. The log also lists every step of the sign-in: addresses
   without values, names of the query parameters and of the cookies, HTTP codes.
 
 ## [1.1.7] - 2026-11-09

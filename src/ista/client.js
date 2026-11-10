@@ -25,6 +25,7 @@ import {
   addDays,
   attribute,
   dayToFrench,
+  textOf,
   describeIndexForm,
   fieldValue,
   looseDay,
@@ -34,10 +35,10 @@ import {
 
 export const PORTAL_DOMAIN = 'ista-webconso.fr';
 export const PORTAL_ORIGIN = `https://${PORTAL_DOMAIN}`;
-// The "Se connecter" link of the portal's public home page: it redirects to
-// ista's Keycloak login form, with the right redirect back. (The bare
-// resident space URL only lands on that public home page, which has no form.)
-export const ENTRY_URL = `${PORTAL_ORIGIN}/espace-client-v2/public/home.do?dispatch=authenticate`;
+// The resident space, where a browser starts: it redirects to the public home page
+// (`public/home.do?dispatch=init`), whose "Résident" link (`?dispatch=authenticate`) redirects
+// to ista's Keycloak login form. The same steps as a resident's browser (2026-11-10).
+export const ENTRY_URL = `${PORTAL_ORIGIN}/espace-client-v2`;
 // Hops through pages that only link to the login (the public home page)
 // before giving up on finding the form.
 const MAX_LOGIN_LINK_HOPS = 2;
@@ -50,15 +51,12 @@ export const INDEX_MENU_URL = `${PORTAL_ORIGIN}/espace-client-v2/menu.do?id=lgtO
 // menu.do pasted in a browser sends back to the public home page (role choice, 2026-11-09):
 // the menu entry is followed from the dashboard, with it as Referer, like a click.
 export const DASHBOARD_URL = `${PORTAL_ORIGIN}/espace-client-v2/occupant/tableauBordLogement.do?dispatch=init`;
-// Where the identity server sends the browser back: the redirect_uri of the Keycloak client
-// (`client_data` of the live login page, 2026-11-10), `…/public/loginIpmp.do?dispatch=loginTenant`.
-// It lives under /public/ and answers a page (HTTP 200), not a redirect: with a bad code, its
-// "Une erreur interne est survenue" page (checked live with a made-up code, 2026-11-10). So
-// landing there says nothing by itself: the session is checked on the dashboard.
+// Where the identity server sends back: the redirect_uri of the Keycloak client (`client_data`
+// of the live login page, 2026-11-10), `ista-webconso.fr/…/public/loginIpmp.do?dispatch=loginTenant`
+// whatever host the sign-in started on. In a resident's browser it answers a redirect (302 to
+// monCompte.do, then ficheLogement.do, then the dashboard); an answer there (HTTP 200) is its
+// "Une erreur interne est survenue" page (checked live with a made-up code): a failed sign-in.
 export const CALLBACK_PATH = '/espace-client-v2/public/loginIpmp.do';
-// Script or meta redirects followed from the callback page before checking the session (a
-// SameSite=Strict session only reaches the next page through such a same-site navigation).
-const MAX_PAGE_REDIRECTS = 2;
 
 // The `dispatch` values of the index form (ficheIndexDemandeOccupant.js on the
 // portal). Water: seen on a live account (2026-11-08). Heating (heat cost
@@ -149,37 +147,15 @@ export function isPortalErrorPage(html) {
 }
 
 /**
- * Where a page sends the browser by itself (meta refresh, or `location` set by an inline
- * script), as an absolute URL on the portal; null when it does not. Never a logout, a new
- * sign-in or another site; `onclick` attributes are not scripts that run.
+ * The message of the portal's error page (its headings: the same fixed text for everyone,
+ * never account data), or null.
  */
-export function findPageRedirect(html, pageUrl) {
-  const candidates = [];
-  for (const [tag] of html.matchAll(/<meta\b[^>]*>/gi)) {
-    if (!/^refresh$/i.test(attribute(tag, 'http-equiv') ?? '')) continue;
-    const target = (attribute(tag, 'content') ?? '').match(/url\s*=\s*['"]?([^'"\s;]+)/i);
-    if (target) candidates.push(target[1]);
-  }
-  for (const [, script] of html.matchAll(
-    /<script\b(?![^>]*\bsrc\s*=)[^>]*>([\s\S]*?)<\/script>/gi,
-  )) {
-    const assignments = script.matchAll(
-      /location(?:\.href)?\s*=\s*(['"])([^'"]+)\1|location\.(?:replace|assign)\(\s*(['"])([^'"]+)\3\s*\)/g,
-    );
-    for (const match of assignments) candidates.push(match[2] ?? match[4]);
-  }
-  for (const candidate of candidates) {
-    let url;
-    try {
-      url = new URL(candidate, pageUrl);
-    } catch {
-      continue;
-    }
-    if (url.protocol !== 'https:' || url.hostname.replace(/^www\./, '') !== PORTAL_DOMAIN) continue;
-    if (/logout|dispatch=authenticate/i.test(`${url.pathname}${url.search}`)) continue;
-    if (url.toString() !== pageUrl) return url.toString();
-  }
-  return null;
+export function portalErrorMessage(html) {
+  const block = html.match(/id\s*=\s*["']middleError["'][^>]*>([\s\S]*?)<\/div>/i)?.[1] ?? '';
+  const headings = [...block.matchAll(/<h[1-6]\b[^>]*>([\s\S]*?)<\/h[1-6]>/gi)]
+    .map(([, text]) => textOf(text))
+    .filter(Boolean);
+  return headings.length ? headings.join(' ').slice(0, 160) : null;
 }
 
 const CAPTCHA_MARKERS = /g-recaptcha|grecaptcha|h-captcha|hcaptcha|frc-captcha|cf-turnstile/i;
@@ -299,20 +275,23 @@ export class IstaClient {
     let currentUrl = url;
     let currentMethod = method;
     let body = form ? new URLSearchParams(form).toString() : undefined;
-    // Once a redirect chain has gone through another site (login.ista.com back to the portal), a
-    // browser keeps the portal's SameSite=Strict session cookie out of it: the sign-in callback then
-    // starts a fresh session. Sending the pre-login one made the portal fail on loginIpmp.do
-    // (« Une erreur interne est survenue », two residents, 2026-11-09).
+    // Once a redirect chain has gone through another site (login.ista.com back to the portal), the
+    // SameSite=Strict session held before stays out of it: the sign-in callback starts a fresh
+    // session (1.1.6). But the session the callback sets must go along to the next hops
+    // (loginIpmp.do 302 → monCompte.do 302 → ficheLogement.do → dashboard in a resident's browser,
+    // 2026-11-10): 1.1.6 and 1.1.7 left it out too, so monCompte.do saw no session.
     const siteOf = (address) => new URL(address).hostname.split('.').slice(-2).join('.');
-    let crossSite = false;
+    let withhold;
     for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
-      crossSite = crossSite || siteOf(currentUrl) !== siteOf(url);
+      if (!withhold && siteOf(currentUrl) !== siteOf(url)) {
+        withhold = this.jar.strictCookies();
+      }
       const headers = {
         'User-Agent': USER_AGENT,
         Accept: accept ?? 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
         'Accept-Language': 'fr-FR,fr;q=0.9',
       };
-      const cookie = this.jar.headerFor(currentUrl, { crossSite });
+      const cookie = this.jar.headerFor(currentUrl, { withhold });
       if (cookie) {
         headers.Cookie = cookie;
       }
@@ -431,49 +410,24 @@ export class IstaClient {
         `the login ended at ${safeUrl(result.url)} instead of the portal`,
       );
     }
-    if (this.isSignedOut(result)) {
-      // Most likely the callback page (public/loginIpmp.do, HTTP 200): see CALLBACK_PATH.
-      await this.confirmSession(result, trace);
+    // An error page anywhere on the way (monCompte.do without a session answers one, HTTP 200).
+    const reason =
+      this.signedOutReason(result) ?? (isPortalErrorPage(result.body) ? 'error page' : null);
+    if (reason) {
+      // In a browser the sign-in ends on the resident's dashboard, through redirects only.
+      const message = isPortalErrorPage(result.body) ? portalErrorMessage(result.body) : null;
+      const where =
+        new URL(result.url).pathname === CALLBACK_PATH ? 'the sign-in callback' : 'the portal';
+      throw new AuthError(
+        AUTH_ERRORS.SESSION_EXPIRED,
+        `${where} answered at ${safeUrl(result.url)} (HTTP ${result.status}, ${reason}${message ? `: "${message}"` : ''}) instead of the resident's pages: no session kept; sign-in steps: ${trace.join(' > ')}`,
+      );
     }
     this.saveSession();
     // The session is renewed whenever the portal drops it, possibly at every
     // reading: only the first sign-in of this account is worth an info line.
     this.logger[this.signedIn ? 'debug' : 'info']('Signed in to the ista portal');
     this.signedIn = true;
-  }
-
-  /**
-   * The sign-in came back on a public page of the portal (the callback page): follow what the
-   * page does by itself, like a browser, then check the session on the resident's dashboard.
-   * Throws an AuthError that lists the sign-in hops (names only) when the session is not kept.
-   */
-  async confirmSession(landing, trace) {
-    const steps = () => `sign-in steps: ${trace.join(' > ')}`;
-    if (isPortalErrorPage(landing.body)) {
-      throw new AuthError(
-        AUTH_ERRORS.SESSION_EXPIRED,
-        `the portal answered its error page at ${safeUrl(landing.url)} (HTTP ${landing.status}) on the way back from the identity server; ${steps()}`,
-      );
-    }
-    let page = landing;
-    for (let hop = 0; hop < MAX_PAGE_REDIRECTS; hop += 1) {
-      const next = findPageRedirect(page.body, page.url);
-      if (!next) {
-        break;
-      }
-      page = await this.request(next, { referer: page.url, trace });
-    }
-    if (!this.isSignedOut(page)) {
-      return;
-    }
-    const check = await this.request(DASHBOARD_URL, { referer: page.url, trace });
-    const reason = this.signedOutReason(check);
-    if (reason) {
-      throw new AuthError(
-        AUTH_ERRORS.SESSION_EXPIRED,
-        `the portal did not keep the session of the sign-in: the resident dashboard answered a ${reason} at ${safeUrl(check.url)} (HTTP ${check.status}); ${steps()}`,
-      );
-    }
   }
 
   /** True when a portal answer is the sign-in, not the page asked for. */

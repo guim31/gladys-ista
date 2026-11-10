@@ -9,7 +9,7 @@ import {
   describeHop,
   findAuthenticateLink,
   findLoginForm,
-  findPageRedirect,
+  portalErrorMessage,
   periodStart,
   safeUrl,
 } from '../src/ista/client.js';
@@ -149,8 +149,8 @@ test('a page without the index form is a portal change, described without values
 });
 
 test('the public home page is followed to Keycloak, and a fake account is refused', async () => {
-  // Home -> "Se connecter" link -> Keycloak form -> refused password: the
-  // path of the live portal, checked without credentials on 2026-10-13.
+  // Resident space -> home page -> "Résident" link -> Keycloak form -> refused password: the
+  // path of the live portal, checked without credentials (2026-10-13, 2026-11-10).
   const portal = createFakePortal({ homeFirst: true });
   await assert.rejects(
     client(portal, { email: 'nobody@example.org', password: 'wrong' }).login(),
@@ -159,9 +159,12 @@ test('the public home page is followed to Keycloak, and a fake account is refuse
   const visited = portal.requests.map((r) => new URL(r.url));
   assert.deepEqual(
     visited
-      .slice(0, 4)
+      .slice(0, 7)
       .map((u) => `${u.host}${u.pathname}?${u.searchParams.get('dispatch') ?? ''}`),
     [
+      'ista-webconso.fr/espace-client-v2?',
+      'ista-webconso.fr/espace-client-v2/?',
+      'ista-webconso.fr/espace-client-v2/public/home.do?init',
       'ista-webconso.fr/espace-client-v2/public/home.do?authenticate',
       'ista-webconso.fr/espace-client-v2/public/home.do?init',
       'ista-webconso.fr/espace-client-v2/public/home.do?authenticate',
@@ -215,38 +218,57 @@ test('an unknown login page is reported as a portal change', async () => {
   await assert.rejects(ista.login(), (err) => err.code === AUTH_ERRORS.LOGIN_FORM_NOT_FOUND);
 });
 
-test('the sign-in callback goes without the pre-login SameSite=Strict session, like a browser', async () => {
+test('the sign-in follows the browser: home page, Keycloak, loginIpmp.do, monCompte.do, dashboard', async () => {
   const portal = createFakePortal({ strictCallback: true });
-  const ista = client(portal);
-  const meters = await readWater(ista);
-  assert.equal(meters.length, 2);
-  assert.equal(portal.logins, 1);
+  await client(portal).login();
+  assert.deepEqual(
+    portal.requests.map((r) => {
+      const u = new URL(r.url);
+      return `${r.method} ${u.host}${u.pathname}`;
+    }),
+    [
+      'GET ista-webconso.fr/espace-client-v2',
+      'GET ista-webconso.fr/espace-client-v2/',
+      'GET ista-webconso.fr/espace-client-v2/public/home.do',
+      'GET ista-webconso.fr/espace-client-v2/public/home.do',
+      'GET login.ista.com/realms/dsp-webconso-fr/protocol/openid-connect/auth',
+      'POST login.ista.com/realms/dsp-webconso-fr/login-actions/authenticate',
+      'GET ista-webconso.fr/espace-client-v2/public/loginIpmp.do',
+      'GET ista-webconso.fr/espace-client-v2/monCompte.do',
+      'GET ista-webconso.fr/espace-client-v2/occupant/ficheLogement.do',
+      'GET ista-webconso.fr/espace-client-v2/occupant/tableauBordLogement.do',
+    ],
+  );
 });
 
-test('the callback page (public/loginIpmp.do, HTTP 200) is not a lost session: the dashboard decides', async () => {
-  // 1.1.5 to 1.1.7 stopped on this page because of its /public/ address ("no session kept").
-  const portal = createFakePortal({ callback: 'page', strictCallback: true });
+test('the callback goes without the pre-login Strict session, the next hops with the new one', async () => {
+  const portal = createFakePortal({ strictCallback: true });
   const meters = await readWater(client(portal));
   assert.equal(meters.length, 2);
   assert.equal(portal.logins, 1);
-  const paths = portal.requests.map((r) => new URL(r.url).pathname);
-  const callback = paths.indexOf('/espace-client-v2/public/loginIpmp.do');
-  assert.equal(paths[callback + 1], '/espace-client-v2/occupant/tableauBordLogement.do');
+  const sent = (path) => portal.requests.find((r) => r.url.includes(path)).cookie;
+  assert.ok(!sent('/public/loginIpmp.do').includes('JSESSIONID'));
+  // 1.1.6 and 1.1.7 left the session set by loginIpmp.do out of these hops too.
+  assert.match(sent('/monCompte.do'), /JSESSIONID=session-1/);
+  assert.match(sent('/occupant/ficheLogement.do'), /JSESSIONID=session-1/);
 });
 
-test('the script of the callback page is followed like a browser, never its logout button', async () => {
-  const portal = createFakePortal({ strictCallback: true });
-  await client(portal).login();
-  const callback = portal.requests.findIndex((r) => r.url.includes('/public/loginIpmp.do'));
-  const next = portal.requests[callback + 1];
-  assert.match(next.url, /\/occupant\/tableauBordLogement\.do\?dispatch=init$/);
-  // Same-site navigation from the callback page: the new SameSite=Strict session goes along.
-  assert.match(next.cookie, /JSESSIONID=session-1/);
-  assert.match(
-    next.referer,
-    /^https:\/\/ista-webconso\.fr\/espace-client-v2\/public\/loginIpmp\.do/,
+test('the cookie jar withholds the cookies held before, never the ones set since', () => {
+  const jar = new CookieJar([], { sharedDomain: 'ista-webconso.fr' });
+  const set = (header) =>
+    jar.storeFrom(
+      new Response(null, { headers: [['set-cookie', header]] }),
+      'https://ista-webconso.fr/espace-client-v2/x',
+    );
+  set('JSESSIONID=old; Path=/espace-client-v2; SameSite=Strict');
+  set('LAX=1; Path=/');
+  const withhold = jar.strictCookies();
+  assert.equal(jar.headerFor('https://ista-webconso.fr/espace-client-v2/y', { withhold }), 'LAX=1');
+  set('JSESSIONID=new; Path=/espace-client-v2; SameSite=Strict');
+  assert.equal(
+    jar.headerFor('https://ista-webconso.fr/espace-client-v2/y', { withhold }),
+    'LAX=1; JSESSIONID=new',
   );
-  assert.ok(!portal.requests.some((r) => r.url.includes('logout')));
 });
 
 test('the sign-in sends Referer and Origin as a browser does', async () => {
@@ -259,7 +281,24 @@ test('the sign-in sends Referer and Origin as a browser does', async () => {
   const callback = portal.requests.find((r) => r.url.includes('/public/loginIpmp.do'));
   assert.equal(callback.referer, 'https://login.ista.com/');
   assert.equal(callback.origin, undefined);
-  assert.ok(!callback.cookie.includes('pre-login'));
+});
+
+test('a callback that answers its error page (HTTP 200) is a failed sign-in, with its message', async () => {
+  const portal = createFakePortal({ callback: 'error' });
+  await assert.rejects(client(portal).login(), (err) => {
+    assert.equal(err.code, AUTH_ERRORS.SESSION_EXPIRED);
+    assert.match(
+      err.message,
+      /^the sign-in callback answered at ista-webconso\.fr\/espace-client-v2\/public\/loginIpmp\.do \(HTTP 200, error page: "Une erreur interne est survenue Le serveur est dans l'incapacité de fournir la page souhaitée\."\)/,
+    );
+    assert.match(
+      err.message,
+      /GET ista-webconso\.fr\/espace-client-v2\/public\/loginIpmp\.do\?dispatch,session_state,iss,code 200 sent\[SRV|GET ista-webconso\.fr\/espace-client-v2\/public\/loginIpmp\.do\?dispatch,session_state,iss,code 200$/,
+    );
+    return true;
+  });
+  // Nothing after the error page: never its logout button.
+  assert.match(portal.requests.at(-1).url, /\/public\/loginIpmp\.do\?/);
 });
 
 test('a session the portal does not keep: the log lists the sign-in hops, names only', async () => {
@@ -268,11 +307,11 @@ test('a session the portal does not keep: the log lists the sign-in hops, names 
     assert.equal(err.code, AUTH_ERRORS.SESSION_EXPIRED);
     assert.match(
       err.message,
-      /the resident dashboard answered a public page at ista-webconso\.fr\/espace-client-v2\/public\/home\.do/,
+      /^the portal answered at ista-webconso\.fr\/espace-client-v2\/monCompte\.do \(HTTP 200, /,
     );
     assert.match(
       err.message,
-      /sign-in steps: GET ista-webconso\.fr\/espace-client-v2\/public\/home\.do\?dispatch 302 set\[JSESSIONID\]/,
+      /sign-in steps: GET ista-webconso\.fr\/espace-client-v2 302 > GET ista-webconso\.fr\/espace-client-v2\/ 302 > /,
     );
     assert.match(
       err.message,
@@ -280,7 +319,11 @@ test('a session the portal does not keep: the log lists the sign-in hops, names 
     );
     assert.match(
       err.message,
-      /GET ista-webconso\.fr\/espace-client-v2\/public\/loginIpmp\.do\?dispatch,session_state,iss,code 200 set\[JSESSIONID\]/,
+      /GET ista-webconso\.fr\/espace-client-v2\/public\/loginIpmp\.do\?dispatch,session_state,iss,code 302 set\[JSESSIONID,SRV\]/,
+    );
+    assert.match(
+      err.message,
+      /GET ista-webconso\.fr\/espace-client-v2\/monCompte\.do\?dispatch 200 sent\[JSESSIONID,SRV\]$/,
     );
     for (const value of [
       'ONE-TIME-CODE',
@@ -288,6 +331,7 @@ test('a session the portal does not keep: the log lists the sign-in hops, names 
       'session-1',
       'pre-login',
       'auth-1',
+      'web01',
       ACCOUNT.email,
       ACCOUNT.password,
     ]) {
@@ -297,19 +341,12 @@ test('a session the portal does not keep: the log lists the sign-in hops, names 
   });
 });
 
-test('the portal error page after the identity server is told as such', async () => {
-  const portal = createFakePortal({ callback: 'error' });
-  await assert.rejects(client(portal).login(), (err) => {
-    assert.equal(err.code, AUTH_ERRORS.SESSION_EXPIRED);
-    assert.match(
-      err.message,
-      /error page at ista-webconso\.fr\/espace-client-v2\/public\/loginIpmp\.do \(HTTP 200\)/,
-    );
-    assert.match(err.message, /sign-in steps: /);
-    return true;
-  });
-  // Nothing after the error page: neither its logout button nor the dashboard.
-  assert.match(portal.requests.at(-1).url, /\/public\/loginIpmp\.do\?/);
+test('portalErrorMessage reads the headings of the error page only', () => {
+  assert.equal(
+    portalErrorMessage(fixture('callback-error.html')),
+    "Une erreur interne est survenue Le serveur est dans l'incapacité de fournir la page souhaitée.",
+  );
+  assert.equal(portalErrorMessage(fixture('public-home.html')), null);
 });
 
 test('describeHop keeps names, never values, except an OAuth error code', () => {
@@ -318,10 +355,7 @@ test('describeHop keeps names, never values, except an OAuth error code', () => 
       'GET',
       'https://ista-webconso.fr/espace-client-v2/public/loginIpmp.do?dispatch=loginTenant&code=SECRET',
       200,
-      {
-        sent: ['ApplicationGatewayAffinity'],
-        set: ['JSESSIONID'],
-      },
+      { sent: ['ApplicationGatewayAffinity'], set: ['JSESSIONID'] },
     ),
     'GET ista-webconso.fr/espace-client-v2/public/loginIpmp.do?dispatch,code 200 sent[ApplicationGatewayAffinity] set[JSESSIONID]',
   );
@@ -332,47 +366,6 @@ test('describeHop keeps names, never values, except an OAuth error code', () => 
       200,
     ),
     'GET ista-webconso.fr/x?error,error_description 200 error=temporarily_unavailable error_description=authentication_expired__b_',
-  );
-});
-
-test('findPageRedirect follows a meta refresh or a script, on the portal only', () => {
-  const page =
-    'https://ista-webconso.fr/espace-client-v2/public/loginIpmp.do?dispatch=loginTenant&code=X';
-  assert.equal(
-    findPageRedirect(fixture('callback-bounce.html'), page),
-    'https://ista-webconso.fr/espace-client-v2/occupant/tableauBordLogement.do?dispatch=init',
-  );
-  assert.equal(
-    findPageRedirect(
-      '<meta http-equiv="refresh" content="0; url=/espace-client-v2/occupant/a.do">',
-      page,
-    ),
-    'https://ista-webconso.fr/espace-client-v2/occupant/a.do',
-  );
-  assert.equal(
-    findPageRedirect(
-      '<script>window.location.replace("https://www.ista-webconso.fr/espace-client-v2/b.do")</script>',
-      page,
-    ),
-    'https://www.ista-webconso.fr/espace-client-v2/b.do',
-  );
-  // Never: a button, a logout, a new sign-in, another site, a script file.
-  assert.equal(findPageRedirect(fixture('callback-error.html'), page), null);
-  assert.equal(
-    findPageRedirect("<script>location.href='../public/login.do?dispatch=logout'</script>", page),
-    null,
-  );
-  assert.equal(
-    findPageRedirect("<script>location.href='home.do?dispatch=authenticate'</script>", page),
-    null,
-  );
-  assert.equal(
-    findPageRedirect("<script>location.href='https://evil.example/'</script>", page),
-    null,
-  );
-  assert.equal(
-    findPageRedirect('<script src="/x.js">location.href="/espace-client-v2/c.do"</script>', page),
-    null,
   );
 });
 
