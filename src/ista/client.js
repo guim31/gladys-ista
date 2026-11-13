@@ -25,6 +25,7 @@ import {
   addDays,
   attribute,
   dayToFrench,
+  textOf,
   describeIndexForm,
   fieldValue,
   looseDay,
@@ -34,10 +35,10 @@ import {
 
 export const PORTAL_DOMAIN = 'ista-webconso.fr';
 export const PORTAL_ORIGIN = `https://${PORTAL_DOMAIN}`;
-// The "Se connecter" link of the portal's public home page: it redirects to
-// ista's Keycloak login form, with the right redirect back. (The bare
-// resident space URL only lands on that public home page, which has no form.)
-export const ENTRY_URL = `${PORTAL_ORIGIN}/espace-client-v2/public/home.do?dispatch=authenticate`;
+// The resident space, where a browser starts: it redirects to the public home page
+// (`public/home.do?dispatch=init`), whose "Résident" link (`?dispatch=authenticate`) redirects
+// to ista's Keycloak login form. The same steps as a resident's browser (2026-11-10).
+export const ENTRY_URL = `${PORTAL_ORIGIN}/espace-client-v2`;
 // Hops through pages that only link to the login (the public home page)
 // before giving up on finding the form.
 const MAX_LOGIN_LINK_HOPS = 2;
@@ -50,6 +51,12 @@ export const INDEX_MENU_URL = `${PORTAL_ORIGIN}/espace-client-v2/menu.do?id=lgtO
 // menu.do pasted in a browser sends back to the public home page (role choice, 2026-11-09):
 // the menu entry is followed from the dashboard, with it as Referer, like a click.
 export const DASHBOARD_URL = `${PORTAL_ORIGIN}/espace-client-v2/occupant/tableauBordLogement.do?dispatch=init`;
+// Where the identity server sends back: the redirect_uri of the Keycloak client (`client_data`
+// of the live login page, 2026-11-10), `ista-webconso.fr/…/public/loginIpmp.do?dispatch=loginTenant`
+// whatever host the sign-in started on. In a resident's browser it answers a redirect (302 to
+// monCompte.do, then ficheLogement.do, then the dashboard); an answer there (HTTP 200) is its
+// "Une erreur interne est survenue" page (checked live with a made-up code): a failed sign-in.
+export const CALLBACK_PATH = '/espace-client-v2/public/loginIpmp.do';
 
 // The `dispatch` values of the index form (ficheIndexDemandeOccupant.js on the
 // portal). Water: seen on a live account (2026-11-08). Heating (heat cost
@@ -106,6 +113,49 @@ export function safeUrl(url) {
   } catch {
     return '(invalid URL)';
   }
+}
+
+/**
+ * One hop of an exchange, for the sign-in diagnostics: method, host and path, the NAMES of the
+ * query parameters, the status, the NAMES of the cookies sent and set. Never a value, except an
+ * OAuth `error` code (a fixed word), reduced to safe characters.
+ */
+export function describeHop(method, url, status, { sent = [], set = [] } = {}) {
+  const { host, pathname, searchParams } = new URL(url);
+  const params = [...new Set(searchParams.keys())];
+  let hop = `${method} ${host}${pathname}${params.length ? `?${params.join(',')}` : ''} ${status}`;
+  if (sent.length) hop += ` sent[${sent.join(',')}]`;
+  if (set.length) hop += ` set[${set.join(',')}]`;
+  for (const name of ['error', 'error_description']) {
+    const value = searchParams.get(name);
+    if (value) hop += ` ${name}=${value.replace(/[^\w.-]/g, '_').slice(0, 60)}`;
+  }
+  return hop;
+}
+
+const cookieNames = (header) =>
+  header
+    ? header
+        .split(';')
+        .map((pair) => pair.split('=')[0].trim())
+        .filter(Boolean)
+    : [];
+
+/** The portal's error page ("Une erreur interne est survenue", block `#middleError`). */
+export function isPortalErrorPage(html) {
+  return /id\s*=\s*["']middleError["']|Une erreur interne est survenue/i.test(html);
+}
+
+/**
+ * The message of the portal's error page (its headings: the same fixed text for everyone,
+ * never account data), or null.
+ */
+export function portalErrorMessage(html) {
+  const block = html.match(/id\s*=\s*["']middleError["'][^>]*>([\s\S]*?)<\/div>/i)?.[1] ?? '';
+  const headings = [...block.matchAll(/<h[1-6]\b[^>]*>([\s\S]*?)<\/h[1-6]>/gi)]
+    .map(([, text]) => textOf(text))
+    .filter(Boolean);
+  return headings.length ? headings.join(' ').slice(0, 160) : null;
 }
 
 const CAPTCHA_MARKERS = /g-recaptcha|grecaptcha|h-captcha|hcaptcha|frc-captcha|cf-turnstile/i;
@@ -215,34 +265,46 @@ export class IstaClient {
   /**
    * One HTTP exchange, following the redirects by hand so every hop stores
    * and replays its cookies. A POST answered by a redirect continues as a GET.
+   * The `referer` is sent on every hop, as a browser does under the sites'
+   * `strict-origin-when-cross-origin` policy: whole on the same origin, its
+   * origin alone elsewhere. A POST also carries its `Origin`.
+   * @param {string[]} [options.trace] receives one describeHop() line per hop
    * @returns {Promise<{ status, url, contentType, body }>}
    */
-  async request(url, { method = 'GET', form, accept, referer } = {}) {
+  async request(url, { method = 'GET', form, accept, referer, trace } = {}) {
     let currentUrl = url;
     let currentMethod = method;
     let body = form ? new URLSearchParams(form).toString() : undefined;
-    // Once a redirect chain has gone through another site (login.ista.com back to the portal), a
-    // browser keeps the portal's SameSite=Strict session cookie out of it: the sign-in callback then
-    // starts a fresh session. Sending the pre-login one made the portal fail on loginIpmp.do
-    // (« Une erreur interne est survenue », two residents, 2026-11-09).
+    // Once a redirect chain has gone through another site (login.ista.com back to the portal), the
+    // SameSite=Strict session held before stays out of it: the sign-in callback starts a fresh
+    // session (1.1.6). But the session the callback sets must go along to the next hops
+    // (loginIpmp.do 302 → monCompte.do 302 → ficheLogement.do → dashboard in a resident's browser,
+    // 2026-11-10): 1.1.6 and 1.1.7 left it out too, so monCompte.do saw no session.
     const siteOf = (address) => new URL(address).hostname.split('.').slice(-2).join('.');
-    let crossSite = false;
+    let withhold;
     for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
-      crossSite = crossSite || siteOf(currentUrl) !== siteOf(url);
+      if (!withhold && siteOf(currentUrl) !== siteOf(url)) {
+        withhold = this.jar.strictCookies();
+      }
       const headers = {
         'User-Agent': USER_AGENT,
         Accept: accept ?? 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
         'Accept-Language': 'fr-FR,fr;q=0.9',
       };
-      const cookie = this.jar.headerFor(currentUrl, { crossSite });
+      const cookie = this.jar.headerFor(currentUrl, { withhold });
       if (cookie) {
         headers.Cookie = cookie;
       }
       if (body !== undefined) {
         headers['Content-Type'] = 'application/x-www-form-urlencoded';
       }
-      if (referer && currentUrl === url) {
-        headers.Referer = referer;
+      if (referer) {
+        const from = new URL(referer);
+        const sameOrigin = from.origin === new URL(currentUrl).origin;
+        headers.Referer = sameOrigin ? from.href.replace(/#.*$/, '') : `${from.origin}/`;
+        if (currentMethod === 'POST') {
+          headers.Origin = from.origin;
+        }
       }
       const response = await this.fetch(currentUrl, {
         method: currentMethod,
@@ -252,6 +314,12 @@ export class IstaClient {
         signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
       });
       this.jar.storeFrom(response, currentUrl);
+      trace?.push(
+        describeHop(currentMethod, currentUrl, response.status, {
+          sent: cookieNames(cookie),
+          set: (response.headers.getSetCookie?.() ?? []).flatMap((c) => cookieNames(c).slice(0, 1)),
+        }),
+      );
       const location = response.headers.get('location');
       if (response.status >= 300 && response.status < 400 && location) {
         await response.body?.cancel(); // free the connection, the body is unused
@@ -287,7 +355,9 @@ export class IstaClient {
       throw new AuthError(AUTH_ERRORS.NO_CREDENTIALS, 'e-mail or password missing');
     }
     this.jar.clear();
-    let page = await this.request(ENTRY_URL);
+    // Every hop of this sign-in, told when the portal does not keep the session.
+    const trace = [];
+    let page = await this.request(ENTRY_URL, { trace });
     let form = findLoginForm(page.body, page.url);
     // Should the portal show its public home page again, follow its sign-in
     // link like a user would.
@@ -296,7 +366,7 @@ export class IstaClient {
       if (!link) {
         break;
       }
-      page = await this.request(link);
+      page = await this.request(link, { trace });
       form = findLoginForm(page.body, page.url);
     }
     if (CAPTCHA_MARKERS.test(page.body)) {
@@ -316,6 +386,8 @@ export class IstaClient {
         [form.userField]: this.config.email,
         [form.passwordField]: this.config.password,
       },
+      referer: page.url,
+      trace,
     });
     if (OTP_MARKERS.test(result.body)) {
       throw new AuthError(AUTH_ERRORS.TWO_FACTOR, 'the account asks for a second factor');
@@ -338,11 +410,17 @@ export class IstaClient {
         `the login ended at ${safeUrl(result.url)} instead of the portal`,
       );
     }
-    if (new URL(result.url).pathname.includes('/public/')) {
-      // Back on the public home page: the portal did not keep the session of this sign-in.
+    // An error page anywhere on the way (monCompte.do without a session answers one, HTTP 200).
+    const reason =
+      this.signedOutReason(result) ?? (isPortalErrorPage(result.body) ? 'error page' : null);
+    if (reason) {
+      // In a browser the sign-in ends on the resident's dashboard, through redirects only.
+      const message = isPortalErrorPage(result.body) ? portalErrorMessage(result.body) : null;
+      const where =
+        new URL(result.url).pathname === CALLBACK_PATH ? 'the sign-in callback' : 'the portal';
       throw new AuthError(
         AUTH_ERRORS.SESSION_EXPIRED,
-        `the sign-in ended on the public page ${safeUrl(result.url)}: no session kept`,
+        `${where} answered at ${safeUrl(result.url)} (HTTP ${result.status}, ${reason}${message ? `: "${message}"` : ''}) instead of the resident's pages: no session kept; sign-in steps: ${trace.join(' > ')}`,
       );
     }
     this.saveSession();
@@ -367,7 +445,9 @@ export class IstaClient {
     // its public home page (sign-in link, no form).
     if (url.hostname.replace(/^www\./, '') !== PORTAL_DOMAIN) return 'another site';
     if (result.status === 401) return 'HTTP 401';
-    if (url.pathname.includes('/public/')) return 'public page';
+    if (url.pathname.includes('/public/')) {
+      return isPortalErrorPage(result.body) ? 'error page' : 'public page';
+    }
     if (findLoginForm(result.body, result.url) !== null) return 'login form';
     if (findAuthenticateLink(result.body, result.url) !== null) return 'sign-in link';
     return null;

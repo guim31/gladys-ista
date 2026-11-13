@@ -21,3 +21,9 @@ value (meter numbers, locations, indexes, dates, address, tokens) is invented.
   on the live portal on 2026-10-13 without credentials).
 - `login-error.html`, `login-otp.html`, `login-captcha.html`: the same page
   after a refused password, asking for a second factor, with a captcha.
+- `callback-error.html`: what the sign-in callback (`public/loginIpmp.do?dispatch=loginTenant`)
+  answers, HTTP 200, when it fails: the portal's "Une erreur interne est survenue" page (seen live
+  with a made-up code on 2026-11-10, shortened).
+  When it works, a resident's browser shows a redirect (302) to `monCompte.do`, then
+  `ficheLogement.do`, then the dashboard (2026-11-10): `test/helpers/fakePortal.js` plays it.
+  `monCompte.do` without a session answers the same error page (seen live).

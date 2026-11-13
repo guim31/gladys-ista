@@ -98,18 +98,23 @@ export class CookieJar {
     }
   }
 
-  /** The `Cookie` header for a request to `requestUrl` ('' when none matches). */
+  /** The `SameSite=Strict` cookies held now (see headerFor's `withhold`). */
+  strictCookies() {
+    return new Set(this.cookies.filter((c) => c.sameSite === 'strict'));
+  }
+
   /**
+   * The `Cookie` header for a request to `requestUrl` ('' when none matches).
    * @param {string} requestUrl
    * @param {object} [options]
-   * @param {boolean} [options.crossSite] the request comes from another site (a redirect chain that
-   *   went through it): `SameSite=Strict` cookies stay home, as in a browser.
+   * @param {Set<object>} [options.withhold] cookies left out (strictCookies() taken when a redirect
+   *   chain came from another site). A cookie set again since then is a new one, and goes.
    */
-  headerFor(requestUrl, { crossSite = false } = {}) {
+  headerFor(requestUrl, { withhold } = {}) {
     const url = new URL(requestUrl);
     return this.cookies
       .filter((c) => domainMatches(c, url.hostname) && url.pathname.startsWith(c.path))
-      .filter((c) => !(crossSite && c.sameSite === 'strict'))
+      .filter((c) => !withhold?.has(c))
       .map((c) => `${c.name}=${c.value}`)
       .join('; ');
   }
