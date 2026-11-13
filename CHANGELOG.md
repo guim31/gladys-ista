@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [1.1.8] - 2026-11-13
+
 ### Fixed
 
 - The session that the portal opens when the sign-in comes back (`loginIpmp.do`) now goes along to
@@ -125,7 +127,8 @@ the notes of the version's GitHub Release.
   dashboard widget.
 - Every text in English, French, German and Spanish.
 
-[Unreleased]: https://github.com/guim31/gladys-ista/compare/v1.1.7...HEAD
+[Unreleased]: https://github.com/guim31/gladys-ista/compare/v1.1.8...HEAD
+[1.1.8]: https://github.com/guim31/gladys-ista/compare/v1.1.7...v1.1.8
 [1.1.7]: https://github.com/guim31/gladys-ista/compare/v1.1.6...v1.1.7
 [1.1.6]: https://github.com/guim31/gladys-ista/compare/v1.1.5...v1.1.6
 [1.1.5]: https://github.com/guim31/gladys-ista/compare/v1.1.4...v1.1.5
