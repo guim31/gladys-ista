@@ -22,6 +22,9 @@ the notes of the version's GitHub Release.
 - A sign-in that ends on the portal's error page (`loginIpmp.do` answering instead of redirecting)
   says so, with the portal's message. The log also lists every step of the sign-in: addresses
   without values, names of the query parameters and of the cookies, HTTP codes.
+- Declared for France only (`countries: ["FR"]`): the Gladys catalog of an
+  instance located elsewhere no longer lists it in its browse views (the
+  search still finds it). Requires Gladys 5.3.0 or later.
 
 ## [1.1.7] - 2026-11-09
 
