@@ -7,6 +7,7 @@ import {
   IstaClient,
   PortalError,
   describeHop,
+  fetchSite,
   findAuthenticateLink,
   findLoginForm,
   portalErrorMessage,
@@ -14,6 +15,9 @@ import {
   safeUrl,
 } from '../src/ista/client.js';
 import { CookieJar, cookiesFromPastedText } from '../src/ista/cookies.js';
+import { browserFetch } from '../src/ista/http.js';
+import http from 'node:http';
+import zlib from 'node:zlib';
 import { KINDS, UnexpectedAnswerError } from '../src/ista/parse.js';
 import { normalizeConfig } from '../src/config.js';
 import { ACCOUNT, createFakePortal, fixture } from './helpers/fakePortal.js';
@@ -283,6 +287,72 @@ test('the sign-in sends Referer and Origin as a browser does', async () => {
   assert.equal(callback.origin, undefined);
 });
 
+test('every hop carries the fetch metadata of a browser navigation', async () => {
+  const portal = createFakePortal({ strictCallback: true });
+  await client(portal).login();
+  const sites = portal.requests.map((r) => [
+    r.method,
+    new URL(r.url).pathname,
+    r.headers['Sec-Fetch-Site'],
+  ]);
+  for (const request of portal.requests) {
+    assert.equal(request.headers['Sec-Fetch-Mode'], 'navigate');
+    assert.equal(request.headers['Sec-Fetch-Dest'], 'document');
+    assert.match(request.headers['User-Agent'], /Firefox\/\d+/);
+  }
+  // A typed address, then the sign-in form posted on its own origin, back on the portal from
+  // another site: cross-site to the end of that chain, like a browser.
+  assert.equal(sites[0][2], 'none');
+  const post = sites.findIndex(([method]) => method === 'POST');
+  assert.equal(sites[post][2], 'same-origin');
+  const callback = sites.findIndex(([, path]) => path.endsWith('/public/loginIpmp.do'));
+  assert.ok(callback > post);
+  for (const [, , site] of sites.slice(callback)) assert.equal(site, 'cross-site');
+});
+
+test('fetchSite tells same-origin, same-site and cross-site apart', () => {
+  assert.equal(fetchSite('https://ista-webconso.fr', 'https://ista-webconso.fr/a'), 'same-origin');
+  assert.equal(
+    fetchSite('https://www.ista-webconso.fr', 'https://ista-webconso.fr/a'),
+    'same-site',
+  );
+  assert.equal(fetchSite('https://login.ista.com', 'https://ista-webconso.fr/a'), 'cross-site');
+});
+
+test('browserFetch sends the headers as given, and reads a compressed answer', async () => {
+  let seen;
+  const server = http.createServer((req, res) => {
+    seen = { method: req.method, headers: req.headers, body: '' };
+    req.on('data', (chunk) => (seen.body += chunk));
+    req.on('end', () => {
+      res.setHeader('Set-Cookie', ['a=1; Path=/', 'b=2; Path=/']);
+      res.setHeader('Content-Encoding', 'gzip');
+      res.setHeader('Location', '/next');
+      res.statusCode = 302;
+      res.end(zlib.gzipSync('page é'));
+    });
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const { port } = server.address();
+    const response = await browserFetch(`http://127.0.0.1:${port}/x`, {
+      method: 'POST',
+      headers: { 'Sec-Fetch-Mode': 'navigate', 'Sec-Fetch-Site': 'cross-site' },
+      body: 'k=v',
+    });
+    // Node's fetch would have sent `sec-fetch-mode: cors` and dropped Sec-Fetch-Site.
+    assert.equal(seen.headers['sec-fetch-mode'], 'navigate');
+    assert.equal(seen.headers['sec-fetch-site'], 'cross-site');
+    assert.equal(seen.body, 'k=v');
+    assert.equal(response.status, 302);
+    assert.equal(response.headers.get('location'), '/next');
+    assert.deepEqual(response.headers.getSetCookie(), ['a=1; Path=/', 'b=2; Path=/']);
+    assert.equal(await response.text(), 'page é');
+  } finally {
+    server.close();
+  }
+});
+
 test('a callback that answers its error page (HTTP 200) is a failed sign-in, with its message', async () => {
   const portal = createFakePortal({ callback: 'error' });
   await assert.rejects(client(portal).login(), (err) => {
@@ -507,4 +577,28 @@ test('helpers', () => {
     safeUrl('https://ista-webconso.fr/espace-client-v2/callback?code=ONE-TIME-CODE'),
     'ista-webconso.fr/espace-client-v2/callback',
   );
+});
+
+test('browserFetch survives a compressed redirect never read and an empty compressed body', async () => {
+  const server = http.createServer((req, res) => {
+    res.setHeader('Content-Encoding', 'gzip');
+    if (req.url === '/redirect') {
+      res.statusCode = 302;
+      res.setHeader('Location', '/next');
+      res.end('not gzip at all');
+    } else {
+      res.end();
+    }
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const { port } = server.address();
+    const redirect = await browserFetch(`http://127.0.0.1:${port}/redirect`);
+    await redirect.body.cancel();
+    const empty = await browserFetch(`http://127.0.0.1:${port}/empty`);
+    assert.equal(await empty.text(), '');
+    await new Promise((resolve) => setTimeout(resolve, 50)); // no uncaught decoder error
+  } finally {
+    server.close();
+  }
 });

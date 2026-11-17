@@ -19,6 +19,7 @@
 
 import { createLogger } from '@gladysassistant/integration-sdk';
 import { CookieJar, cookiesFromPastedText } from './cookies.js';
+import { browserFetch } from './http.js';
 import {
   KINDS,
   UnexpectedAnswerError,
@@ -76,8 +77,20 @@ const HEATING_INPUT_IDS = {
 
 const MAX_REDIRECTS = 10;
 const REQUEST_TIMEOUT_MS = 30000;
-const USER_AGENT =
-  'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0 Safari/537.36';
+// One real browser, and the headers it sends on a page navigation (Firefox 128 ESR). Until 1.1.8
+// the client sent a made-up Chrome agent through Node's fetch, which adds `Sec-Fetch-Mode: cors`
+// and no other fetch metadata: the sign-in callback answered its error page (see src/ista/http.js).
+const USER_AGENT = 'Mozilla/5.0 (X11; Linux x86_64; rv:128.0) Gecko/20100101 Firefox/128.0';
+const NAVIGATION_ACCEPT = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8';
+
+const siteOf = (address) => new URL(address).hostname.split('.').slice(-2).join('.');
+const SITE_ORDER = ['same-origin', 'same-site', 'cross-site'];
+/** `Sec-Fetch-Site` of a request to `url` started by a page of `origin` (Fetch Metadata). */
+export function fetchSite(origin, url) {
+  const target = new URL(url);
+  if (target.origin === origin) return 'same-origin';
+  return siteOf(origin) === siteOf(url) ? 'same-site' : 'cross-site';
+}
 
 export const AUTH_ERRORS = {
   NO_CREDENTIALS: 'no_credentials',
@@ -235,7 +248,7 @@ export class IstaClient {
    *   the session cookies survive a restart (/data)
    * @param {object} [options.logger]
    */
-  constructor({ config, fetch = globalThis.fetch, sessionStore, logger } = {}) {
+  constructor({ config, fetch = browserFetch, sessionStore, logger } = {}) {
     this.config = config;
     this.fetch = fetch;
     this.sessionStore = sessionStore;
@@ -267,7 +280,10 @@ export class IstaClient {
    * and replays its cookies. A POST answered by a redirect continues as a GET.
    * The `referer` is sent on every hop, as a browser does under the sites'
    * `strict-origin-when-cross-origin` policy: whole on the same origin, its
-   * origin alone elsewhere. A POST also carries its `Origin`.
+   * origin alone elsewhere. A POST also carries its `Origin`. Every hop carries the fetch
+   * metadata of a navigation (`Sec-Fetch-*`): `Sec-Fetch-Site` is `none` without a referer (a
+   * typed address), otherwise the furthest relation between the referring page and every URL
+   * of the chain so far, as the Fetch standard computes it (`cross-site` on the sign-in callback).
    * @param {string[]} [options.trace] receives one describeHop() line per hop
    * @returns {Promise<{ status, url, contentType, body }>}
    */
@@ -280,16 +296,28 @@ export class IstaClient {
     // session (1.1.6). But the session the callback sets must go along to the next hops
     // (loginIpmp.do 302 → monCompte.do 302 → ficheLogement.do → dashboard in a resident's browser,
     // 2026-11-10): 1.1.6 and 1.1.7 left it out too, so monCompte.do saw no session.
-    const siteOf = (address) => new URL(address).hostname.split('.').slice(-2).join('.');
     let withhold;
+    let site = 'none';
     for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
       if (!withhold && siteOf(currentUrl) !== siteOf(url)) {
         withhold = this.jar.strictCookies();
       }
+      if (referer) {
+        const relation = fetchSite(new URL(referer).origin, currentUrl);
+        if (site === 'none' || SITE_ORDER.indexOf(relation) > SITE_ORDER.indexOf(site)) {
+          site = relation;
+        }
+      }
       const headers = {
         'User-Agent': USER_AGENT,
-        Accept: accept ?? 'text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8',
+        Accept: accept ?? NAVIGATION_ACCEPT,
         'Accept-Language': 'fr-FR,fr;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Upgrade-Insecure-Requests': '1',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': site,
+        'Sec-Fetch-User': '?1',
       };
       const cookie = this.jar.headerFor(currentUrl, { withhold });
       if (cookie) {

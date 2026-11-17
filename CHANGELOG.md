@@ -10,6 +10,13 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Fixed
+
+- Password sign-in: the integration now talks to the portal like a web browser (Firefox's
+  identity and navigation headers). Node's built-in HTTP client sent headers no browser sends,
+  the last difference found with a resident's browser on the sign-in return page, where the
+  portal answered its error page.
+
 ## [1.1.8] - 2026-11-13
 
 ### Fixed
