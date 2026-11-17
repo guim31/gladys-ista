@@ -36,6 +36,7 @@ src/app.js                        handlers: scan, poll fallback, action, widget,
 src/sync.js                       container timer, latest reading date, dated states, connection status
 src/ista/client.js                portal client: Keycloak sign-in, session, index page search
 src/ista/cookies.js               cookie jar + parsing of a pasted browser cookie
+src/ista/http.js                  fetch on node:https: browser headers sent as given (not undici)
 src/ista/parse.js                 index page form and meter blocks (HTML) -> meters
 src/devices/dwelling.js           the one Gladys device and its features
 src/widgets.js                    dashboard widget handler (manifest `widgets`)
@@ -112,14 +113,23 @@ code de ce dépôt. Compléter ce fichier quand un nouveau piège est découvert
   `login.ista.com/realms/dsp-webconso-fr` (`username`, `password`, `credentialId` caché, pas de
   captcha). Partir de `/espace-client-v2` comme le navigateur (1.1.8), et traiter une page `public/` comme une session
   perdue. **Connexion confirmée par un résident le 08/11/2026** (mot de passe comme cookie).
-  **Le portail répond sur `ista-webconso.fr` et `www.ista-webconso.fr`** (le navigateur est sur www) : le
-  retour de connexion peut arriver sur l'autre nom et y poser un cookie de session « host-only ».
-  `CookieJar({ sharedDomain })` garde ces cookies pour les deux noms (1.1.5, 09/11/2026 : deux résidents
-  « connectés » renvoyés aussitôt à l'accueil public).
-  **Le JSESSIONID du portail est `SameSite=Strict`** : un navigateur ne le renvoie pas au retour de
-  Keycloak (redirection venue d'un autre site), le portail ouvre alors une session neuve. Le renvoyer
-  fait finir la connexion sur `public/loginIpmp.do` (« Une erreur interne est survenue »). Le client
-  imite le navigateur (1.1.6, 09/11/2026 ; corrigé en 1.1.8, voir plus bas).
+  **Le portail répond sur `ista-webconso.fr` et `www.ista-webconso.fr`** : `CookieJar({ sharedDomain })`
+  garde les cookies « host-only » pour les deux noms (1.1.5). Sans effet sur la connexion : tout le
+  parcours reste sur le nom nu (journal de prohand, t/11109/45).
+  **Historique rectifié (17/11/2026)** : la connexion par mot de passe **n'a jamais passé le retour de
+  Keycloak**. Les 1.1.0-1.1.4 écrivaient « Signed in » sans regarder où finissait la connexion : elles
+  aussi finissaient sur la page d'erreur de `loginIpmp.do`, d'où l'accueil public juste après. La 1.1.5
+  n'a rien cassé, elle a ajouté ce contrôle. Le JSESSIONID d'avant la connexion (`SameSite=Strict`)
+  n'est pas la cause : renvoyé (1.1.0-1.1.5) ou écarté comme le fait le navigateur (1.1.6-1.1.8), même
+  page d'erreur. Le client garde le comportement du navigateur (écarté).
+  **Le `fetch` de Node (undici) n'imite pas un navigateur** : il force `Sec-Fetch-Mode: cors` et jette
+  tout en-tête `Sec-*` fourni. Depuis la 1.1.9, `src/ista/http.js` (node:https) envoie les en-têtes tels
+  quels : Firefox 128, `Sec-Fetch-Dest/Mode/Site/User` d'une navigation (`cross-site` au retour de
+  Keycloak), `Upgrade-Insecure-Requests`, gzip/br. C'est la dernière différence visible entre la
+  requête du navigateur et celle de l'intégration sur `loginIpmp.do` (cookies, Referer et parcours
+  identiques) : **hypothèse, à confirmer par un résident**. Si la 1.1.9 échoue encore au même endroit,
+  la cause est côté serveur et invisible d'ici (échange du code, compte) : demander l'en-tête complet
+  de la requête `loginIpmp.do` du navigateur (F12, sans les valeurs des cookies).
   **Le retour de Keycloak est `ista-webconso.fr/espace-client-v2/public/loginIpmp.do?dispatch=loginTenant`**
   (redirect_uri du client `dsp-webconso-fr`, lisible en base64 dans le `client_data` de la page de
   connexion, le même que la connexion parte de www ou non ; la demande d'autorisation n'a ni
@@ -127,10 +137,11 @@ code de ce dépôt. Compléter ce fichier quand un nouveau piège est découvert
   `/espace-client-v2` → `home.do?dispatch=init` → `home.do?dispatch=authenticate` → Keycloak → POST →
   **`loginIpmp.do` 302** → `monCompte.do` 302 → `ficheLogement.do` → `tableauBordLogement.do`. Un
   **200 sur `loginIpmp.do` est un échec** : c'est la page « Une erreur interne est survenue » (même
-  page avec un code inventé, et sur `monCompte.do` sans session). Le JSESSIONID posé par
-  `loginIpmp.do` doit suivre sur `monCompte.do` : seul celui d'avant la connexion reste à l'écart
-  (`jar.strictCookies()` pris au passage par l'autre site, 1.1.8 ; les 1.1.6-1.1.7 écartaient aussi
-  le nouveau). Le journal d'échec liste les étapes de la connexion (noms seulement).
+  page avec un code inventé ou sans code, avec ou sans JSESSIONID, vérifié le 17/11/2026, et sur
+  `monCompte.do` sans session). Le JSESSIONID posé par `loginIpmp.do` doit suivre sur `monCompte.do` :
+  seul celui d'avant la connexion reste à l'écart (`jar.strictCookies()` pris au passage par l'autre
+  site, 1.1.8). Le portail et Keycloak envoient `Referrer-Policy: strict-origin-when-cross-origin` :
+  le Referer du retour est `https://login.ista.com/`, comme le client l'envoie. Le journal d'échec liste les étapes de la connexion (noms seulement).
   Hors du proxy des sessions cloud, le portail est joignable : la partie publique du flux se
   vérifie en direct, sans identifiants (un faux compte est refusé par Keycloak, c'est attendu).
 - **Relevés ista : la page « index à la demande »** (vérifiée le 08/11/2026 sur les pages d'un

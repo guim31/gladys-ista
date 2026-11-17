@@ -161,6 +161,7 @@ export function createFakePortal(options = {}) {
       cookie: init.headers?.Cookie ?? '',
       referer: init.headers?.Referer,
       origin: init.headers?.Origin,
+      headers: { ...init.headers },
     });
     const signedIn = portal.sessions.has(cookies.JSESSIONID);
     // Like the live portal: no redirect_uri nor state, the client's own redirect_uri applies.
