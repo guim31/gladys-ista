@@ -578,3 +578,27 @@ test('helpers', () => {
     'ista-webconso.fr/espace-client-v2/callback',
   );
 });
+
+test('browserFetch survives a compressed redirect never read and an empty compressed body', async () => {
+  const server = http.createServer((req, res) => {
+    res.setHeader('Content-Encoding', 'gzip');
+    if (req.url === '/redirect') {
+      res.statusCode = 302;
+      res.setHeader('Location', '/next');
+      res.end('not gzip at all');
+    } else {
+      res.end();
+    }
+  });
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  try {
+    const { port } = server.address();
+    const redirect = await browserFetch(`http://127.0.0.1:${port}/redirect`);
+    await redirect.body.cancel();
+    const empty = await browserFetch(`http://127.0.0.1:${port}/empty`);
+    assert.equal(await empty.text(), '');
+    await new Promise((resolve) => setTimeout(resolve, 50)); // no uncaught decoder error
+  } finally {
+    server.close();
+  }
+});

@@ -14,12 +14,21 @@ import http from 'node:http';
 import https from 'node:https';
 import zlib from 'node:zlib';
 
+// Decoded once the whole body is read, never as a stream: a redirect whose body is never read
+// (or an empty compressed body) cannot leave a failing decoder behind. Lenient on truncated
+// bodies, like undici; deflate with or without its zlib wrapper, like browsers.
+const LENIENT = { finishFlush: zlib.constants.Z_SYNC_FLUSH };
 const DECODERS = {
-  gzip: () => zlib.createGunzip(),
-  'x-gzip': () => zlib.createGunzip(),
-  deflate: () => zlib.createInflate(),
-  br: () => zlib.createBrotliDecompress(),
+  gzip: (raw) => zlib.gunzipSync(raw, LENIENT),
+  'x-gzip': (raw) => zlib.gunzipSync(raw, LENIENT),
+  deflate: (raw) =>
+    (raw[0] & 0x0f) === 8 ? zlib.inflateSync(raw, LENIENT) : zlib.inflateRawSync(raw, LENIENT),
+  br: (raw) => zlib.brotliDecompressSync(raw),
 };
+
+function decode(raw, encoding) {
+  return raw.length && DECODERS[encoding] ? DECODERS[encoding](raw) : raw;
+}
 
 /**
  * @param {string} url
@@ -35,33 +44,38 @@ export function browserFetch(url, { method = 'GET', headers = {}, body, signal }
   }
   return new Promise((resolve, reject) => {
     const request = transport.request(target, { method, headers: sent, signal }, (response) => {
-      const received = new Headers();
-      const raw = response.rawHeaders;
-      for (let i = 0; i < raw.length; i += 2) {
-        received.append(raw[i], raw[i + 1]);
-      }
-      const encoding = (response.headers['content-encoding'] ?? '').trim().toLowerCase();
-      const stream = DECODERS[encoding] ? response.pipe(DECODERS[encoding]()) : response;
-      let text;
-      resolve({
-        status: response.statusCode,
-        headers: received,
-        text() {
-          text ??= new Promise((done, fail) => {
-            const chunks = [];
-            stream.on('data', (chunk) => chunks.push(chunk));
-            stream.on('end', () => done(Buffer.concat(chunks).toString('utf8')));
-            stream.on('error', fail);
-            response.on('error', fail);
-          });
-          return text;
-        },
-        body: {
-          async cancel() {
-            response.destroy();
+      try {
+        const received = new Headers();
+        const raw = response.rawHeaders;
+        for (let i = 0; i < raw.length; i += 2) {
+          received.append(raw[i], raw[i + 1]);
+        }
+        const encoding = (response.headers['content-encoding'] ?? '').trim().toLowerCase();
+        // Read from the start, so an error of the connection always has a listener.
+        const chunks = [];
+        const body = new Promise((done, fail) => {
+          response.on('data', (chunk) => chunks.push(chunk));
+          response.on('end', () => done(Buffer.concat(chunks)));
+          response.on('error', fail);
+          response.on('aborted', () => fail(new Error('the answer was cut off')));
+        });
+        body.catch(() => {}); // a cancelled or unread body is not an error of its own
+        resolve({
+          status: response.statusCode,
+          headers: received,
+          async text() {
+            return decode(await body, encoding).toString('utf8');
           },
-        },
-      });
+          body: {
+            async cancel() {
+              response.destroy();
+            },
+          },
+        });
+      } catch (error) {
+        response.destroy();
+        reject(error);
+      }
     });
     request.on('error', reject);
     request.end(body);
