@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [1.1.10] - 2026-11-19
+
 ### Fixed
 
 - Password sign-in: on its return from ista's login page, the integration sends back the session
@@ -144,7 +146,8 @@ the notes of the version's GitHub Release.
   dashboard widget.
 - Every text in English, French, German and Spanish.
 
-[Unreleased]: https://github.com/guim31/gladys-ista/compare/v1.1.9...HEAD
+[Unreleased]: https://github.com/guim31/gladys-ista/compare/v1.1.10...HEAD
+[1.1.10]: https://github.com/guim31/gladys-ista/compare/v1.1.9...v1.1.10
 [1.1.9]: https://github.com/guim31/gladys-ista/compare/v1.1.8...v1.1.9
 [1.1.8]: https://github.com/guim31/gladys-ista/compare/v1.1.7...v1.1.8
 [1.1.7]: https://github.com/guim31/gladys-ista/compare/v1.1.6...v1.1.7
