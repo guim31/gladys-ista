@@ -62,7 +62,9 @@ function cookiesOf(headers) {
     header
       .split(';')
       .map((pair) => pair.trim().split('='))
-      .filter(([name]) => name),
+      .filter(([name]) => name)
+      // Like Tomcat with two JSESSIONID (longest path first): the first one names the session.
+      .reverse(),
   );
 }
 
@@ -96,8 +98,10 @@ function html(body, setCookies = [], status = 200) {
  *   (public/loginIpmp.do) answers a good code: like a resident's browser saw it, a redirect to
  *   monCompte.do with a new SameSite=Strict session (default); the same without a session behind
  *   the cookie; its error page
- * @param {boolean} [options.strictCallback] a pre-login SameSite=Strict session, which makes the
- *   callback fail when it comes back with it
+ * @param {'any'|'space'|'root-and-space'} [options.callbackNeeds] which pre-login sessions the
+ *   callback needs to answer its redirect: none ('any', default); the resident space's
+ *   (JSESSIONID `pre-login`, path /espace-client-v2, set by the sign-in link); that one and the
+ *   root's (JSESSIONID `root`, path /, set by `https://ista-webconso.fr/`), in the browser's order
  * @param {Function} [options.answer] `(dispatch, form) => string | Response`,
  *   the meter blocks of a search (form: the posted URLSearchParams); defaults
  *   to the water fixture for water and the heating one for heating
@@ -151,6 +155,19 @@ export function createFakePortal(options = {}) {
     return html(renderIndexPage({ ...portal.index, csrf, ...extra }));
   };
 
+  // The JSESSIONID values sent, in order (the cookie header may hold two).
+  const callbackGetsSessions = (header) => {
+    const sessions = header
+      .split(';')
+      .map((pair) => pair.trim().split('='))
+      .filter(([name]) => name === 'JSESSIONID')
+      .map(([, value]) => value)
+      .join(',');
+    if (options.callbackNeeds === 'space') return sessions.startsWith('pre-login');
+    if (options.callbackNeeds === 'root-and-space') return sessions === 'pre-login,root';
+    return true;
+  };
+
   portal.fetch = async (input, init = {}) => {
     const url = new URL(input);
     const method = init.method ?? 'GET';
@@ -173,6 +190,12 @@ export function createFakePortal(options = {}) {
     const toHome = () => redirect(`${PORTAL}/espace-client-v2/public/home.do?dispatch=init`);
     // Like the live portal: the bare resident space lands on a public home
     // page whose "Se connecter" link (dispatch=authenticate) leads to Keycloak.
+    if (url.origin === PORTAL && url.pathname === '/') {
+      // Like the live portal (2026-11-19): the site's root sets its own session, on the path `/`.
+      return redirect(`${PORTAL}/espace-client-v2`, [
+        'JSESSIONID=root; Path=/; Secure; HttpOnly; SameSite=Strict',
+      ]);
+    }
     if (url.origin === PORTAL && url.pathname === '/espace-client-v2') {
       return redirect(`${PORTAL}/espace-client-v2/`);
     }
@@ -186,16 +209,13 @@ export function createFakePortal(options = {}) {
         if (options.homeFirst && portal.authenticateHits === 1) {
           return toHome();
         }
-        if (options.strictCallback) {
-          // Like the live portal: a pre-login session, SameSite=Strict.
-          const response = toLogin();
-          response.headers.append(
-            'Set-Cookie',
-            'JSESSIONID=pre-login; Path=/espace-client-v2; Secure; HttpOnly; SameSite=Strict',
-          );
-          return response;
-        }
-        return toLogin();
+        // Like the live portal: a pre-login session, SameSite=Strict.
+        const response = toLogin();
+        response.headers.append(
+          'Set-Cookie',
+          'JSESSIONID=pre-login; Path=/espace-client-v2; Secure; HttpOnly; SameSite=Strict',
+        );
+        return response;
       }
       return html(fixture('public-home.html'));
     }
@@ -233,8 +253,7 @@ export function createFakePortal(options = {}) {
       const callbackFails =
         options.callback === 'error' ||
         !url.searchParams.get('code') ||
-        // `strictCallback`: the pre-login session (SameSite=Strict) must not come back with it.
-        (options.strictCallback && cookies.JSESSIONID === 'pre-login');
+        !callbackGetsSessions(init.headers?.Cookie ?? '');
       if (callbackFails) {
         return html(fixture('callback-error.html'));
       }

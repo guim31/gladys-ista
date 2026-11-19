@@ -40,6 +40,17 @@ export const PORTAL_ORIGIN = `https://${PORTAL_DOMAIN}`;
 // (`public/home.do?dispatch=init`), whose "Résident" link (`?dispatch=authenticate`) redirects
 // to ista's Keycloak login form. The same steps as a resident's browser (2026-11-10).
 export const ENTRY_URL = `${PORTAL_ORIGIN}/espace-client-v2`;
+// The site's root, where a typed `ista-webconso.fr` starts: it sets a second JSESSIONID, on the
+// path `/` (checked live, 2026-11-19), then redirects to ENTRY_URL. A resident's browser sent two
+// JSESSIONID of different values on the sign-in callback (Chrome, 2026-11-19): this one and the
+// resident space's (path `/espace-client-v2`) are the only pair a browser can hold for that URL.
+export const ROOT_URL = `${PORTAL_ORIGIN}/`;
+// The two ways the sign-in is tried, at most once each per sign-in (never a loop: the account
+// must not be locked). The log says which one worked, or what each one sent.
+export const SIGN_IN_VARIANTS = [
+  { name: 'space-session', entry: ENTRY_URL },
+  { name: 'root-and-space-sessions', entry: ROOT_URL },
+];
 // Hops through pages that only link to the login (the public home page)
 // before giving up on finding the form.
 const MAX_LOGIN_LINK_HOPS = 2;
@@ -291,17 +302,11 @@ export class IstaClient {
     let currentUrl = url;
     let currentMethod = method;
     let body = form ? new URLSearchParams(form).toString() : undefined;
-    // Once a redirect chain has gone through another site (login.ista.com back to the portal), the
-    // SameSite=Strict session held before stays out of it: the sign-in callback starts a fresh
-    // session (1.1.6). But the session the callback sets must go along to the next hops
-    // (loginIpmp.do 302 → monCompte.do 302 → ficheLogement.do → dashboard in a resident's browser,
-    // 2026-11-10): 1.1.6 and 1.1.7 left it out too, so monCompte.do saw no session.
-    let withhold;
+    // Every cookie of the jar that matches goes, the pre-login SameSite=Strict session included
+    // (1.1.10): a resident's browser sends it back on the sign-in callback (Chrome, 2026-11-19),
+    // which the 1.1.6-1.1.9 withholding (the SameSite theory) contradicted.
     let site = 'none';
     for (let hop = 0; hop <= MAX_REDIRECTS; hop += 1) {
-      if (!withhold && siteOf(currentUrl) !== siteOf(url)) {
-        withhold = this.jar.strictCookies();
-      }
       if (referer) {
         const relation = fetchSite(new URL(referer).origin, currentUrl);
         if (site === 'none' || SITE_ORDER.indexOf(relation) > SITE_ORDER.indexOf(site)) {
@@ -319,7 +324,7 @@ export class IstaClient {
         'Sec-Fetch-Site': site,
         'Sec-Fetch-User': '?1',
       };
-      const cookie = this.jar.headerFor(currentUrl, { withhold });
+      const cookie = this.jar.headerFor(currentUrl);
       if (cookie) {
         headers.Cookie = cookie;
       }
@@ -382,10 +387,41 @@ export class IstaClient {
     if (!this.config.email || !this.config.password) {
       throw new AuthError(AUTH_ERRORS.NO_CREDENTIALS, 'e-mail or password missing');
     }
+    // Start with the variant that worked last; the other one only when the callback fails.
+    const first = this.variantIndex ?? 0;
+    const order = [first, 1 - first];
+    const failures = [];
+    for (const index of order) {
+      const variant = SIGN_IN_VARIANTS[index];
+      try {
+        await this.signInWith(variant);
+      } catch (err) {
+        if (!err.callbackFailed) throw err;
+        failures.push(`variant ${variant.name}: ${err.message}`);
+        if (failures.length < order.length) continue;
+        throw new AuthError(AUTH_ERRORS.SESSION_EXPIRED, failures.join(' | '));
+      }
+      this.variantIndex = index;
+      this.saveSession();
+      // The session is renewed whenever the portal drops it, possibly at every reading: only
+      // the first sign-in of this account is worth an info line, and the variant that worked.
+      this.logger[this.signedIn && !failures.length ? 'debug' : 'info'](
+        `Signed in to the ista portal (variant ${variant.name}${failures.length ? `, after ${failures.length} failed` : ''})`,
+      );
+      this.signedIn = true;
+      return;
+    }
+  }
+
+  /**
+   * One sign-in from `variant.entry`. Throws an AuthError; `callbackFailed` is set when the
+   * sign-in callback answered its error page (the case the other variant may get through).
+   */
+  async signInWith(variant) {
     this.jar.clear();
     // Every hop of this sign-in, told when the portal does not keep the session.
     const trace = [];
-    let page = await this.request(ENTRY_URL, { trace });
+    let page = await this.request(variant.entry, { trace });
     let form = findLoginForm(page.body, page.url);
     // Should the portal show its public home page again, follow its sign-in
     // link like a user would.
@@ -446,16 +482,13 @@ export class IstaClient {
       const message = isPortalErrorPage(result.body) ? portalErrorMessage(result.body) : null;
       const where =
         new URL(result.url).pathname === CALLBACK_PATH ? 'the sign-in callback' : 'the portal';
-      throw new AuthError(
+      const error = new AuthError(
         AUTH_ERRORS.SESSION_EXPIRED,
         `${where} answered at ${safeUrl(result.url)} (HTTP ${result.status}, ${reason}${message ? `: "${message}"` : ''}) instead of the resident's pages: no session kept; sign-in steps: ${trace.join(' > ')}`,
       );
+      error.callbackFailed = where === 'the sign-in callback';
+      throw error;
     }
-    this.saveSession();
-    // The session is renewed whenever the portal drops it, possibly at every
-    // reading: only the first sign-in of this account is worth an info line.
-    this.logger[this.signedIn ? 'debug' : 'info']('Signed in to the ista portal');
-    this.signedIn = true;
   }
 
   /** True when a portal answer is the sign-in, not the page asked for. */

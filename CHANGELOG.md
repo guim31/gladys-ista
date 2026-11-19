@@ -10,6 +10,14 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+### Fixed
+
+- Password sign-in: on its return from ista's login page, the integration sends back the session
+  cookie the portal set before, as a resident's browser does (1.1.6 to 1.1.9 left it out). Should
+  the portal still answer its error page, the sign-in is tried once more from the site's root
+  page, which sets a second session cookie, and both are sent like a browser holding them. Never
+  more than two tries; the log says which way worked, or what each one sent (cookie names only).
+
 ## [1.1.9] - 2026-11-17
 
 ### Fixed
