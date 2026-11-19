@@ -289,6 +289,13 @@ test('a failed callback: one more sign-in from the site root, with both sessions
   assert.equal(portal.requests.filter((r) => r.url.includes('/public/loginIpmp.do')).length, 1);
 });
 
+test('a refused password is not tried a second time', async () => {
+  const portal = createFakePortal();
+  const ista = client(portal, { password: 'wrong' });
+  await assert.rejects(ista.login(), (err) => err.code === AUTH_ERRORS.INVALID_CREDENTIALS);
+  assert.equal(portal.requests.filter((r) => r.method === 'POST').length, 1);
+});
+
 test('the cookie jar sends the longest path first, like a browser', () => {
   const jar = new CookieJar([], { sharedDomain: 'ista-webconso.fr' });
   const set = (header, url) =>

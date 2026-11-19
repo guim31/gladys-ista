@@ -396,7 +396,12 @@ export class IstaClient {
       try {
         await this.signInWith(variant);
       } catch (err) {
-        if (!err.callbackFailed) throw err;
+        if (!err.callbackFailed) {
+          // Keep what the first try told: the reason the second one ran.
+          if (failures.length)
+            err.message = `${failures[0]} | variant ${variant.name}: ${err.message}`;
+          throw err;
+        }
         failures.push(`variant ${variant.name}: ${err.message}`);
         if (failures.length < order.length) continue;
         throw new AuthError(AUTH_ERRORS.SESSION_EXPIRED, failures.join(' | '));
