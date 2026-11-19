@@ -119,9 +119,19 @@ code de ce dépôt. Compléter ce fichier quand un nouveau piège est découvert
   **Historique rectifié (17/11/2026)** : la connexion par mot de passe **n'a jamais passé le retour de
   Keycloak**. Les 1.1.0-1.1.4 écrivaient « Signed in » sans regarder où finissait la connexion : elles
   aussi finissaient sur la page d'erreur de `loginIpmp.do`, d'où l'accueil public juste après. La 1.1.5
-  n'a rien cassé, elle a ajouté ce contrôle. Le JSESSIONID d'avant la connexion (`SameSite=Strict`)
-  n'est pas la cause : renvoyé (1.1.0-1.1.5) ou écarté comme le fait le navigateur (1.1.6-1.1.8), même
-  page d'erreur. Le client garde le comportement du navigateur (écarté).
+  n'a rien cassé, elle a ajouté ce contrôle. **Le JSESSIONID d'avant la connexion** (`SameSite=Strict`) :
+  les 1.1.6-1.1.9 l'écartaient au retour (théorie « le navigateur ne renvoie pas un cookie Strict après
+  un passage par un autre site »), sans succès. **Démentie, avec réserve** : chez Jluc (Chrome, MP du
+  19/11/2026), la requête qu'il pense être `loginIpmp.do` envoie `ApplicationGatewayAffinity`,
+  `ApplicationGatewayAffinityCORS` et **deux JSESSIONID de valeurs différentes**. Vérifié en direct
+  (19/11/2026) : `https://ista-webconso.fr/` (racine tapée) pose un JSESSIONID de **chemin `/`**, et
+  `/espace-client-v2/` comme `home.do` en posent un de chemin `/espace-client-v2` ; c'est la seule paire
+  qu'un navigateur peut envoyer sur ce chemin (un cookie host-only de `www.` ne part pas vers le nom nu).
+  **1.1.10** : le client renvoie tous les cookies (plus d'écart), plus long chemin d'abord comme un
+  navigateur ; si le retour répond encore 200, **une seule** seconde connexion part de la racine
+  (`SIGN_IN_VARIANTS` : `space-session`, puis `root-and-space-sessions`). Le journal de réussite nomme
+  la variante qui a marché (la suivante repart d'elle), celui d'échec liste les étapes des deux. Si les
+  deux échouent, la cause n'est plus dans les cookies.
   **Le `fetch` de Node (undici) n'imite pas un navigateur** : il force `Sec-Fetch-Mode: cors` et jette
   tout en-tête `Sec-*` fourni. Depuis la 1.1.9, `src/ista/http.js` (node:https) envoie les en-têtes tels
   quels : Firefox 128, `Sec-Fetch-Dest/Mode/Site/User` d'une navigation (`cross-site` au retour de
@@ -138,9 +148,8 @@ code de ce dépôt. Compléter ce fichier quand un nouveau piège est découvert
   **`loginIpmp.do` 302** → `monCompte.do` 302 → `ficheLogement.do` → `tableauBordLogement.do`. Un
   **200 sur `loginIpmp.do` est un échec** : c'est la page « Une erreur interne est survenue » (même
   page avec un code inventé ou sans code, avec ou sans JSESSIONID, vérifié le 17/11/2026, et sur
-  `monCompte.do` sans session). Le JSESSIONID posé par `loginIpmp.do` doit suivre sur `monCompte.do` :
-  seul celui d'avant la connexion reste à l'écart (`jar.strictCookies()` pris au passage par l'autre
-  site, 1.1.8). Le portail et Keycloak envoient `Referrer-Policy: strict-origin-when-cross-origin` :
+  `monCompte.do` sans session). Le JSESSIONID posé par `loginIpmp.do` doit suivre sur `monCompte.do`
+  (il remplace celui d'avant : même nom, même chemin). Le portail et Keycloak envoient `Referrer-Policy: strict-origin-when-cross-origin` :
   le Referer du retour est `https://login.ista.com/`, comme le client l'envoie. Le journal d'échec liste les étapes de la connexion (noms seulement).
   Hors du proxy des sessions cloud, le portail est joignable : la partie publique du flux se
   vérifie en direct, sans identifiants (un faux compte est refusé par Keycloak, c'est attendu).

@@ -223,7 +223,7 @@ test('an unknown login page is reported as a portal change', async () => {
 });
 
 test('the sign-in follows the browser: home page, Keycloak, loginIpmp.do, monCompte.do, dashboard', async () => {
-  const portal = createFakePortal({ strictCallback: true });
+  const portal = createFakePortal({ callbackNeeds: 'space' });
   await client(portal).login();
   assert.deepEqual(
     portal.requests.map((r) => {
@@ -245,38 +245,75 @@ test('the sign-in follows the browser: home page, Keycloak, loginIpmp.do, monCom
   );
 });
 
-test('the callback goes without the pre-login Strict session, the next hops with the new one', async () => {
-  const portal = createFakePortal({ strictCallback: true });
+test('the callback gets back the pre-login session, the next hops the new one', async () => {
+  const portal = createFakePortal({ callbackNeeds: 'space' });
   const meters = await readWater(client(portal));
   assert.equal(meters.length, 2);
   assert.equal(portal.logins, 1);
   const sent = (path) => portal.requests.find((r) => r.url.includes(path)).cookie;
-  assert.ok(!sent('/public/loginIpmp.do').includes('JSESSIONID'));
-  // 1.1.6 and 1.1.7 left the session set by loginIpmp.do out of these hops too.
+  // Like a resident's browser (Chrome, 2026-11-19), against the SameSite theory of 1.1.6-1.1.9.
+  assert.match(sent('/public/loginIpmp.do'), /JSESSIONID=pre-login/);
   assert.match(sent('/monCompte.do'), /JSESSIONID=session-1/);
   assert.match(sent('/occupant/ficheLogement.do'), /JSESSIONID=session-1/);
+  // One try was enough: the site's root is never visited.
+  assert.ok(!portal.requests.some((r) => r.url === 'https://ista-webconso.fr/'));
 });
 
-test('the cookie jar withholds the cookies held before, never the ones set since', () => {
-  const jar = new CookieJar([], { sharedDomain: 'ista-webconso.fr' });
-  const set = (header) =>
-    jar.storeFrom(
-      new Response(null, { headers: [['set-cookie', header]] }),
-      'https://ista-webconso.fr/espace-client-v2/x',
-    );
-  set('JSESSIONID=old; Path=/espace-client-v2; SameSite=Strict');
-  set('LAX=1; Path=/');
-  const withhold = jar.strictCookies();
-  assert.equal(jar.headerFor('https://ista-webconso.fr/espace-client-v2/y', { withhold }), 'LAX=1');
-  set('JSESSIONID=new; Path=/espace-client-v2; SameSite=Strict');
-  assert.equal(
-    jar.headerFor('https://ista-webconso.fr/espace-client-v2/y', { withhold }),
-    'LAX=1; JSESSIONID=new',
+test('a failed callback: one more sign-in from the site root, with both sessions', async () => {
+  const portal = createFakePortal({ callbackNeeds: 'root-and-space' });
+  const lines = [];
+  const ista = new IstaClient({
+    config: normalizeConfig(ACCOUNT),
+    fetch: portal.fetch,
+    sessionStore: memorySessionStore(),
+    logger: { debug() {}, warn() {}, error() {}, info: (line) => lines.push(line) },
+  });
+  const meters = await readWater(ista);
+  assert.equal(meters.length, 2);
+  assert.equal(portal.logins, 2);
+  const callbacks = portal.requests.filter((r) => r.url.includes('/public/loginIpmp.do'));
+  assert.deepEqual(
+    callbacks.map((r) => r.cookie.match(/JSESSIONID=[^;]*/g)),
+    [['JSESSIONID=pre-login'], ['JSESSIONID=pre-login', 'JSESSIONID=root']],
   );
+  assert.equal(portal.requests.filter((r) => r.url === 'https://ista-webconso.fr/').length, 1);
+  assert.deepEqual(lines, [
+    'Signed in to the ista portal (variant root-and-space-sessions, after 1 failed)',
+  ]);
+  // The next sign-in starts with the variant that worked: one try.
+  portal.expireSessions();
+  portal.requests.length = 0;
+  await readWater(ista);
+  assert.equal(portal.logins, 3);
+  assert.equal(portal.requests.filter((r) => r.url === 'https://ista-webconso.fr/').length, 1);
+  assert.equal(portal.requests.filter((r) => r.url.includes('/public/loginIpmp.do')).length, 1);
+});
+
+test('a refused password is not tried a second time', async () => {
+  const portal = createFakePortal();
+  const ista = client(portal, { password: 'wrong' });
+  await assert.rejects(ista.login(), (err) => err.code === AUTH_ERRORS.INVALID_CREDENTIALS);
+  assert.equal(portal.requests.filter((r) => r.method === 'POST').length, 1);
+});
+
+test('the cookie jar sends the longest path first, like a browser', () => {
+  const jar = new CookieJar([], { sharedDomain: 'ista-webconso.fr' });
+  const set = (header, url) =>
+    jar.storeFrom(new Response(null, { headers: [['set-cookie', header]] }), url);
+  set('JSESSIONID=root; Path=/; SameSite=Strict', 'https://ista-webconso.fr/');
+  set(
+    'JSESSIONID=space; Path=/espace-client-v2; SameSite=Strict',
+    'https://ista-webconso.fr/espace-client-v2/x',
+  );
+  assert.equal(
+    jar.headerFor('https://ista-webconso.fr/espace-client-v2/y'),
+    'JSESSIONID=space; JSESSIONID=root',
+  );
+  assert.equal(jar.headerFor('https://ista-webconso.fr/other'), 'JSESSIONID=root');
 });
 
 test('the sign-in sends Referer and Origin as a browser does', async () => {
-  const portal = createFakePortal({ strictCallback: true });
+  const portal = createFakePortal({ callbackNeeds: 'space' });
   await client(portal).login();
   const post = portal.requests.find((r) => r.method === 'POST');
   assert.equal(post.origin, 'https://login.ista.com');
@@ -288,7 +325,7 @@ test('the sign-in sends Referer and Origin as a browser does', async () => {
 });
 
 test('every hop carries the fetch metadata of a browser navigation', async () => {
-  const portal = createFakePortal({ strictCallback: true });
+  const portal = createFakePortal({ callbackNeeds: 'space' });
   await client(portal).login();
   const sites = portal.requests.map((r) => [
     r.method,
@@ -359,20 +396,27 @@ test('a callback that answers its error page (HTTP 200) is a failed sign-in, wit
     assert.equal(err.code, AUTH_ERRORS.SESSION_EXPIRED);
     assert.match(
       err.message,
-      /^the sign-in callback answered at ista-webconso\.fr\/espace-client-v2\/public\/loginIpmp\.do \(HTTP 200, error page: "Une erreur interne est survenue Le serveur est dans l'incapacité de fournir la page souhaitée\."\)/,
+      /^variant space-session: the sign-in callback answered at ista-webconso\.fr\/espace-client-v2\/public\/loginIpmp\.do \(HTTP 200, error page: "Une erreur interne est survenue Le serveur est dans l'incapacité de fournir la page souhaitée\."\)/,
     );
     assert.match(
       err.message,
-      /GET ista-webconso\.fr\/espace-client-v2\/public\/loginIpmp\.do\?dispatch,session_state,iss,code 200 sent\[SRV|GET ista-webconso\.fr\/espace-client-v2\/public\/loginIpmp\.do\?dispatch,session_state,iss,code 200$/,
+      /loginIpmp\.do\?dispatch,session_state,iss,code 200 sent\[JSESSIONID\] \| variant root-and-space-sessions: the sign-in callback answered/,
+    );
+    assert.match(err.message, /sign-in steps: GET ista-webconso\.fr\/ 302 set\[JSESSIONID\] > /);
+    assert.match(
+      err.message,
+      /loginIpmp\.do\?dispatch,session_state,iss,code 200 sent\[JSESSIONID,JSESSIONID\]$/,
     );
     return true;
   });
+  // Two tries, never more: the account must not be locked.
+  assert.equal(portal.requests.filter((r) => r.url.includes('/public/loginIpmp.do')).length, 2);
   // Nothing after the error page: never its logout button.
   assert.match(portal.requests.at(-1).url, /\/public\/loginIpmp\.do\?/);
 });
 
 test('a session the portal does not keep: the log lists the sign-in hops, names only', async () => {
-  const portal = createFakePortal({ callback: 'lost', strictCallback: true });
+  const portal = createFakePortal({ callback: 'lost', callbackNeeds: 'space' });
   await assert.rejects(client(portal).login(), (err) => {
     assert.equal(err.code, AUTH_ERRORS.SESSION_EXPIRED);
     assert.match(
@@ -389,7 +433,7 @@ test('a session the portal does not keep: the log lists the sign-in hops, names 
     );
     assert.match(
       err.message,
-      /GET ista-webconso\.fr\/espace-client-v2\/public\/loginIpmp\.do\?dispatch,session_state,iss,code 302 set\[JSESSIONID,SRV\]/,
+      /GET ista-webconso\.fr\/espace-client-v2\/public\/loginIpmp\.do\?dispatch,session_state,iss,code 302 sent\[JSESSIONID\] set\[JSESSIONID,SRV\]/,
     );
     assert.match(
       err.message,

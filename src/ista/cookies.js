@@ -98,23 +98,16 @@ export class CookieJar {
     }
   }
 
-  /** The `SameSite=Strict` cookies held now (see headerFor's `withhold`). */
-  strictCookies() {
-    return new Set(this.cookies.filter((c) => c.sameSite === 'strict'));
-  }
-
   /**
-   * The `Cookie` header for a request to `requestUrl` ('' when none matches).
+   * The `Cookie` header for a request to `requestUrl` ('' when none matches), longest path
+   * first like a browser (RFC 6265 5.4): the resident space's JSESSIONID, then the root's.
    * @param {string} requestUrl
-   * @param {object} [options]
-   * @param {Set<object>} [options.withhold] cookies left out (strictCookies() taken when a redirect
-   *   chain came from another site). A cookie set again since then is a new one, and goes.
    */
-  headerFor(requestUrl, { withhold } = {}) {
+  headerFor(requestUrl) {
     const url = new URL(requestUrl);
     return this.cookies
       .filter((c) => domainMatches(c, url.hostname) && url.pathname.startsWith(c.path))
-      .filter((c) => !withhold?.has(c))
+      .sort((a, b) => b.path.length - a.path.length)
       .map((c) => `${c.name}=${c.value}`)
       .join('; ');
   }
